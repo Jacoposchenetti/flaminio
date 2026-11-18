@@ -10,6 +10,11 @@ uniform sampler2D ground_albedo : source_color, filter_linear_mipmap_anisotropic
 uniform sampler2D ground_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D grass_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D grass_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
+// Coperture (1 m per pixel, da convert_osm): RGB = tinta dell'erba, A = prato. Prati e parchi sono parte del terreno.
+uniform sampler2D cover : source_color, filter_linear, repeat_disable;
+uniform vec2 cover_origin;
+uniform vec2 cover_extent = vec2(1.0);
+uniform bool has_cover = false;
 
 varying float h; // scavo del Tevere: 0 in città, negativo su muraglioni, banchine e fondale
 varying vec2 wpos;
@@ -17,6 +22,13 @@ varying float slope; // 0 in piano, 1 in verticale
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
 }
 
 void vertex() {
@@ -60,11 +72,24 @@ void fragment() {
 	// In città: le scarpate tra strade e palazzi sono prato, quelle quasi verticali muri di contenimento.
 	float city = 1.0 - smoothstep(-0.05, -0.4, h);
 	float green = smoothstep(0.035, 0.08, slope) * city;
-	float retain = smoothstep(0.28, 0.4, slope) * city;
+	vec4 cv = has_cover ? texture(cover, (wpos - cover_origin) / cover_extent) : vec4(0.0);
+	float in_lawn = has_cover ? smoothstep(0.35, 0.65, cv.a) : 0.0;
+	// Muri di contenimento solo dove è quasi verticale; nei parchi le scarpate restano prato fino a ~60°.
+	float retain = mix(smoothstep(0.32, 0.45, slope), smoothstep(0.5, 0.65, slope), in_lawn) * city;
 	vec3 tufo = texture(ground_albedo, vec2(wpos.x + wpos.y, wpos.x * 0.37 - wpos.y * 0.21) / 2.0).rgb * vec3(0.85, 0.72, 0.55);
 	col = mix(col, grass * 0.85, green * (1.0 - retain));
+	// Prati, boschi e campi (aree di OpenStreetMap): erba tinta come nei parchi, con chiazze secche.
+	float lawn = 0.0;
+	if (has_cover) {
+		lawn = in_lawn * city * (1.0 - retain);
+		vec3 g = texture(grass_albedo, wpos / 4.0).rgb;
+		float dry = smoothstep(0.45, 0.8, noise(wpos / 18.0));
+		g = mix(g, g * vec3(1.6, 1.25, 0.6), dry * 0.6);
+		vec3 tint = clamp(cv.rgb / vec3(0.13, 0.22, 0.05), vec3(0.5), vec3(1.6));
+		col = mix(col, g * tint, lawn);
+	}
 	col = mix(col, tufo, retain);
 	ALBEDO = mix(col, mud, wet);
-	NORMAL_MAP = mix(texture(ground_normal, guv).rgb, texture(grass_normal, wpos / 4.0).rgb, max(bank * (1.0 - wet), green * (1.0 - retain)));
-	ROUGHNESS = mix(0.9, 0.5, wet);
+	NORMAL_MAP = mix(texture(ground_normal, guv).rgb, texture(grass_normal, wpos / 4.0).rgb, max(max(bank * (1.0 - wet), green * (1.0 - retain)), lawn));
+	ROUGHNESS = mix(mix(0.9, 0.95, lawn), 0.5, wet);
 }

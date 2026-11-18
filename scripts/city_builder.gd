@@ -202,6 +202,41 @@ func ground_basis(x: float, z: float, yaw: float, half_len := 2.0, half_w := 0.9
 	return Basis(up.cross(fwd), up, fwd).orthonormalized()
 
 
+## Quota della maglia del terreno com'è disegnata (vertici ogni ~4 m, vedi _build_terrain): dove la strada passa
+## tra due vertici più alti, il triangolo del terreno sta sopra la quota vera. Strade e cordoli non scendono sotto.
+func mesh_top_at(x: float, z: float) -> float:
+	var nx := hmap_w / 2 + 1
+	var nz := hmap_h / 2 + 1
+	var sx := (hmap_w - 1) * cell / nx
+	var sz := (hmap_h - 1) * cell / nz
+	var fx := clampf((x - origin.x) / sx, 0.0, nx - 0.001)
+	var fz := clampf((z - origin.y) / sz, 0.0, nz - 0.001)
+	var ix := int(fx)
+	var iz := int(fz)
+	var tx := fx - ix
+	var tz := fz - iz
+	var x0 := origin.x + ix * sx
+	var z0 := origin.y + iz * sz
+	var h00 := height_at(x0, z0)
+	var h10 := height_at(x0 + sx, z0)
+	var h01 := height_at(x0, z0 + sz)
+	var h11 := height_at(x0 + sx, z0 + sz)
+	# Non so da che parte la PlaneMesh taglia il quadrato: prendo il più alto dei due modi.
+	var d1 := h00 + (h10 - h00) * tx + (h11 - h10) * tz if tx > tz else h00 + (h01 - h00) * tz + (h11 - h01) * tx
+	var d2 := h00 + (h10 - h00) * tx + (h01 - h00) * tz if tx + tz < 1.0 else h11 + (h01 - h11) * (1.0 - tx) + (h10 - h11) * (1.0 - tz)
+	return maxf(d1, d2)
+
+
+## Quota a cui appoggiare strade, vialetti e cordoli: il terreno, mai sotto la maglia disegnata.
+func road_ground(x: float, z: float, keep_up: bool) -> float:
+	return maxf(surface_at(x, z) if keep_up else height_at(x, z), mesh_top_at(x, z))
+
+
+## Quota di una sezione di carreggiata (in piano in larghezza): nemmeno ai bordi la maglia del terreno la copre.
+func _road_y(p: Vector2, off: Vector2, keep_up: bool) -> float:
+	return maxf(road_ground(p.x, p.y, keep_up), maxf(mesh_top_at(p.x + off.x, p.y + off.y), mesh_top_at(p.x - off.x, p.y - off.y)))
+
+
 func _sample(arr: PackedFloat32Array, x: float, z: float) -> float:
 	var fx := clampf((x - origin.x) / cell, 0.0, hmap_w - 1.001)
 	var fz := clampf((z - origin.y) / cell, 0.0, hmap_h - 1.001)
@@ -319,6 +354,13 @@ func _build_terrain() -> void:
 	mat.set_shader_parameter("ground_normal", TexLib.tex("Concrete034", "normal"))
 	mat.set_shader_parameter("grass_albedo", TexLib.tex("Grass004", "color"))
 	mat.set_shader_parameter("grass_normal", TexLib.tex("Grass004", "normal"))
+	var cover := _load_cover()
+	if cover:
+		var cs: Array = data["cover_size"]
+		mat.set_shader_parameter("cover", cover)
+		mat.set_shader_parameter("cover_origin", bbox.position)
+		mat.set_shader_parameter("cover_extent", Vector2(float(cs[0]), float(cs[1])))
+		mat.set_shader_parameter("has_cover", true)
 	var size := Vector2(hmap_w - 1, hmap_h - 1) * cell
 	var center := origin + size * 0.5
 	var plane := PlaneMesh.new()
@@ -400,7 +442,21 @@ func _road_material() -> ShaderMaterial:
 	return mat
 
 
+## Coperture del suolo (data/cover_png.bin, PNG da convert_osm): prati e parchi disegnati nel terreno.
+func _load_cover() -> ImageTexture:
+	if not data.has("cover_size"):
+		return null
+	var bytes := FileAccess.get_file_as_bytes("res://data/cover_png.bin")
+	if bytes.is_empty():
+		return null
+	var img := Image.new()
+	if img.load_png_from_buffer(bytes) != OK:
+		return null
+	return ImageTexture.create_from_image(img)
+
+
 func _build_areas() -> void:
+	var lawn_in_terrain := data.has("cover_size") and FileAccess.file_exists("res://data/cover_png.bin")
 	var green := Acc.new()
 	var plaza := Acc.new()
 	var water := Acc.new()
@@ -411,6 +467,8 @@ func _build_areas() -> void:
 		if idx.is_empty():
 			continue
 		var kind: String = a["k"]
+		if lawn_in_terrain and AREA_COLORS.has(kind):
+			continue  # i prati li disegna il terreno (coperture)
 		var y := Y_AREA
 		var acc := green
 		var col: Color = AREA_COLORS.get(kind, Color.WHITE)
@@ -532,6 +590,9 @@ func _build_roads() -> void:
 			code = 2.0
 			yoff = Y_TRAM
 		var is_bridge := int(r["b"]) == 1
+		var deck: Array = r.get("y", []) if is_bridge else []  # quote dell'impalcato ai vertici (convert_osm)
+		if deck.size() != count:
+			deck = []
 		var col := Color(code / 4.0, w / 32.0, 0)
 
 		# Distanza (lungo la strada) dal bordo dell'incrocio precedente e da quello successivo.
@@ -578,7 +639,9 @@ func _build_roads() -> void:
 				u += seg_len[i]
 			# Carreggiate e ponti restano alla quota della città; i vialetti scendono in banchina.
 			var keep_up := is_bridge or kind != "foot"
-			var ground := surface_at(p.x, p.y) if keep_up else height_at(p.x, p.y)
+			var ground := _road_y(p, off, keep_up)
+			if not deck.is_empty():
+				ground = float(deck[i])
 			var y := ground + yoff
 			var l := Vector3(p.x + off.x, y, p.y + off.y)
 			var rr := Vector3(p.x - off.x, y, p.y - off.y)
@@ -597,7 +660,7 @@ func _build_roads() -> void:
 					var nr3 := prev_r.lerp(rr, t)
 					if k < pieces:
 						var cq := a.lerp(p, t)
-						nl3.y = (surface_at(cq.x, cq.y) if keep_up else height_at(cq.x, cq.y)) + yoff
+						nl3.y = _road_y(cq, off, keep_up) + yoff
 						nr3.y = nl3.y
 					var t0 := float(k - 1) / pieces
 					acc.quad(
@@ -608,7 +671,9 @@ func _build_roads() -> void:
 					pl = nl3
 					pr = nr3
 				if is_bridge and not on_bridge((a + p) * 0.5):
-					_bridge_segment(bridge_body, a, p, w, _stone_mat)
+					var ya := float(deck[i - 1]) if not deck.is_empty() else 0.0
+					var yb := float(deck[i]) if not deck.is_empty() else 0.0
+					_bridge_segment(bridge_body, Vector3(a.x, ya, a.y), Vector3(p.x, yb, p.y), w, _stone_mat)
 				elif kind == "road" and w >= 6.0 and length > 0.5:
 					var s0 := maxf(0.0, 1.0 - dp[i - 1])
 					var s1 := minf(length, length - maxf(0.0, 1.0 - dn[i]))
@@ -686,14 +751,15 @@ func _add_parking(a: Vector2, b: Vector2, length: float, d_prev: float, d_next: 
 func _pieces_needed(a: Vector2, b: Vector2, keep_up: bool, length: float) -> int:
 	if length < 4.0:
 		return 1
-	var ha := surface_at(a.x, a.y) if keep_up else height_at(a.x, a.y)
-	var hb := surface_at(b.x, b.y) if keep_up else height_at(b.x, b.y)
+	var ha := road_ground(a.x, a.y, keep_up)
+	var hb := road_ground(b.x, b.y, keep_up)
 	var dev := 0.0
 	for t: float in [0.25, 0.5, 0.75]:
 		var q := a.lerp(b, t)
-		var hq := surface_at(q.x, q.y) if keep_up else height_at(q.x, q.y)
+		var hq := road_ground(q.x, q.y, keep_up)
 		dev = maxf(dev, absf(hq - lerpf(ha, hb, t)))
-	return 1 if dev < 0.03 else maxi(1, ceili(length / 3.0))
+	# L'errore di un tratto dritto cala col quadrato dei pezzi: quanti ne servono per stare entro 4 cm.
+	return 1 if dev < 0.04 else clampi(ceili(sqrt(dev / 0.04)), 1, maxi(1, ceili(length / 2.0)))
 
 
 ## Cordolo del marciapiede lungo un lato della carreggiata: alto 15 cm, largo 25; segue salite e discese.
@@ -705,8 +771,8 @@ func _curb(acc: Acc, a: Vector2, b: Vector2, side: Vector2, half: float) -> void
 	for k in pieces:
 		var pa := a.lerp(b, float(k) / pieces)
 		var pb := a.lerp(b, float(k + 1) / pieces)
-		var ga := surface_at(pa.x, pa.y)
-		var gb := surface_at(pb.x, pb.y)
+		var ga := _road_y(pa, side * half, true)  # come la carreggiata accanto
+		var gb := _road_y(pb, side * half, true)
 		var inner_a := pa + side * half
 		var inner_b := pb + side * half
 		var outer_a := pa + side * (half + 0.25)
@@ -762,13 +828,16 @@ func _lamp_mesh(detailed: bool) -> ArrayMesh:
 
 
 ## Impalcato e parapetti di un tratto di ponte, con collisione.
-func _bridge_segment(body: StaticBody3D, a: Vector2, b: Vector2, w: float, mat: Material) -> void:
+func _bridge_segment(body: StaticBody3D, a: Vector3, b: Vector3, w: float, mat: Material) -> void:
 	var length := a.distance_to(b)
 	if length < 0.1:
 		return
 	var mid := (a + b) * 0.5
-	var ang := atan2(b.y - a.y, b.x - a.x)
-	var xf := Transform3D(Basis(Vector3.UP, -ang), Vector3(mid.x, 0, mid.y))
+	# Impalcato inclinato tra le due quote: asse x lungo il ponte, y la sua normale.
+	var dx := (b - a).normalized()
+	var dz := dx.cross(Vector3.UP).normalized()
+	var dy := dz.cross(dx).normalized()
+	var xf := Transform3D(Basis(dx, dy, dz), mid)
 	var parts := [
 		[Vector3(length + 0.4, 1.2, w + 0.6), Vector3(0, -0.55, 0)],
 		[Vector3(length + 0.2, 1.1, 0.35), Vector3(0, 0.55, w * 0.5 + 0.12)],

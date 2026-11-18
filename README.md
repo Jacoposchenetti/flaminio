@@ -138,15 +138,16 @@ inquadrature), `--fight`, `--cops`, `--stairs=n`, `--shop=n`, `--inside=edificio
 ## Crediti
 
 - Mappa © OpenStreetMap contributors (ODbL).
-- Rilievo: TINITALY/1.1, Tarquini S. et al., INGV, https://doi.org/10.13127/tinitaly/1.1 (CC BY 4.0).
+- Rilievo: LiDAR DTM 1 m Regione Lazio, Piano Straordinario di Telerilevamento, Ministero dell'Ambiente e della
+  Sicurezza Energetica (open data); dove manca, TINITALY/1.1, Tarquini S. et al., INGV,
+  https://doi.org/10.13127/tinitaly/1.1 (CC BY 4.0).
 - Personaggi e animazioni: Universal Base Characters e Universal Animation Library di Quaternius (CC0).
 - Auto e armi: Quaternius e altri autori CC0, scaricati da Poly Pizza.
 - Texture: ambientCG (CC0).
 
 ## Prossimi passi possibili
 
-Vestiti veri al posto di quelli dipinti, giorno e notte,
-rilievo reale di Parioli e Villa Glori, MAXXI modellato a mano.
+Vestiti veri al posto di quelli dipinti, giorno e notte, MAXXI modellato a mano.
 
 ## Aggiornamenti per gli amici
 
@@ -165,23 +166,32 @@ La copia di sviluppo (senza `manifest.json`) non si aggiorna mai da sola.
   `--menushot=file.png` salva la schermata del menu).
 - Lo zip completo (`tools/make_package.ps1`) porta la versione di `tools/versione.txt`.
 
-## Rilievo vero (salite e discese) — SPENTO, da rifare
+## Rilievo vero (salite e discese)
 
-Per ora il quartiere è in piano: la prima versione (sotto) aveva aree intere sbagliate (dato a 10 m troppo
-grossolano, strade appoggiate sopra il terreno invece che dentro). Si accende solo con `convert_osm.py ... --rilievo`.
-Il codice che segue le quote (`surface_at`, `ground_basis`...) resta e con il rilievo a zero non cambia niente.
+Il quartiere ha le quote vere, prese dal **LiDAR della Regione Lazio** (DTM a 1 m, terreno nudo, volo 2014 del
+Piano Straordinario di Telerilevamento del MASE, open data). Le tessere si scaricano dalla Banca Dati PST
+(https://sim.mase.gov.it/pst/, LiDAR Lazio, dtm 1x1) e si importano con
+`python tools/import_lidar.py CARTELLA_CON_I_TIFF` (→ `data/dem/lidar_dtm.npy`). Dove il volo non arriva (una
+striscia a sud-est, verso Villa Borghese) si usa il TINITALY dell'INGV a 10 m (`tools/fetch_dem.py`), allineato al
+LiDAR sul bordo. `convert_osm.py` lo porta sulla griglia del gioco (celle di 2 m, quota zero = il lungotevere) e lo
+tratta come un progetto stradale:
 
-Prima versione: `tools/fetch_dem.py` scarica il modello del terreno TINITALY dell'INGV (terreno nudo,
-celle di 10 m) e ne ritaglia Flaminio in `data/dem/`; `tools/convert_osm.py` lo porta sulla griglia del gioco
-(quota zero = il lungotevere) e lo sistema come una città vera:
+1. **Profilo verticale di tutta la rete stradale insieme** (minimi quadrati sparsi, `_solve_profiles`): ogni 2 m
+   la quota misurata, niente gobbe sotto i ~20-30 m, incroci in piano perché i nodi sono condivisi, pendenza delle
+   carreggiate al massimo 16%. Seconda passata robusta (dossi isolati contano meno).
+2. **Ponti e viadotti** dritti tra i loro attacchi a terra (i marciapiedi di un viadotto prendono la quota della
+   carreggiata accanto); le quote ai vertici vanno in `city.json` (`"y"`) e le usano impalcati, parapetti e
+   traffico. Sotto i ponti il terreno si ricostruisce dai lati (il LiDAR a volte tiene il viadotto come terrapieno).
+3. Carreggiate e marciapiedi in piano in larghezza alla quota del profilo, raccordati al terreno; piazze e campi
+   in piano; ogni palazzo su un piano alla quota della strada carrabile più vicina (se è allo stesso livello).
+4. Entro 30 m dal Tevere quota zero (muraglioni e banchine del gioco), poi in 60 m il terreno vero.
 
-- sotto i grandi edifici toglie le "collinette" che il modello a volte vede (cupola del Palazzetto, stadi);
-- le strade sono in piano in larghezza, prendono la quota più bassa tra centro e bordi (ai piedi delle scarpate) e
-  hanno pendenze limitate al 14% (rete rilassata: ai piedi dei Parioli il modello fa rampe finte);
-- ogni palazzo poggia su un piano orizzontale alla quota della sua strada; piazze e campi sportivi in piano;
-- vicino al Tevere tutto resta a quota zero (muraglioni e banchine come prima); i laghetti stanno alla loro quota.
+In gioco `surface_at()` è la quota su cui si cammina e si guida, `carve_at()` quanto scava il fiume,
+`ground_basis()` inclina auto e autobus, `mesh_top_at()` la quota della maglia del terreno com'è disegnata (vertici
+ogni ~4 m): strade, vialetti e cordoli non scendono mai sotto, nemmeno ai bordi. Prati, boschi e campi non sono
+più superfici a parte: li disegna lo shader del terreno da `data/cover_png.bin` (PNG a 1 m per pixel), così
+seguono il rilievo senza buchi. Scarpate: prato oltre il ~30%, muri di contenimento in tufo quasi in verticale
+(nei parchi solo oltre ~60°). I locali si aprono solo dove la porta è a livello del marciapiede.
 
-Esce `data/heights.bin` (rilievo + Tevere) e `data/relief.bin` (solo rilievo). In gioco `surface_at()` è la quota
-su cui si cammina e si guida, `carve_at()` quanto scava il fiume, `ground_basis()` inclina auto e autobus.
-Il terreno colora da solo le scarpate: prato oltre il ~30%, muri di contenimento in tufo quasi in verticale.
-I locali si aprono solo dove la porta è a livello del marciapiede. Prova in salita: `--hilltest=x,z,gradi --drive=go`.
+Per tornare in piano: `convert_osm.py ... --piano`. Prova in salita: `--hilltest=x,z,gradi --drive=go`.
+Diagnostica: `RILIEVO_DEBUG=file.npz` salva terreno e profili stradali.

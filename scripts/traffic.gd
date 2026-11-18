@@ -37,6 +37,9 @@ func setup(c: CityBuilder, world_node: Node, cb: Combat) -> void:
 			continue
 		var pts := city._pts(r["p"])
 		var ow: int = int(r.get("o", 0))
+		var deck: Array = r.get("y", [])  # quote dei ponti ai vertici (convert_osm)
+		if deck.size() != pts.size():
+			deck = []
 		for i in pts.size() - 1:
 			var a: int = node_of.call(pts[i])
 			var b: int = node_of.call(pts[i + 1])
@@ -44,10 +47,12 @@ func setup(c: CityBuilder, world_node: Node, cb: Combat) -> void:
 				continue
 			var w: float = r["w"]
 			var br: bool = int(r["b"]) == 1
+			var ya := float(deck[i]) if br and not deck.is_empty() else 0.0
+			var yb := float(deck[i + 1]) if br and not deck.is_empty() else 0.0
 			if ow >= 0:
-				_adj[a].append([b, w, br, ow != 0])
+				_adj[a].append([b, w, br, ow != 0, ya, yb])
 			if ow <= 0:
-				_adj[b].append([a, w, br, ow != 0])
+				_adj[b].append([a, w, br, ow != 0, yb, ya])
 
 
 func _physics_process(delta: float) -> void:
@@ -291,9 +296,17 @@ class TrafficCar:
 		var dir := (b - a) / _len
 		var right := Vector2(-dir.y, dir.x)  # z verso sud: questo è il lato destro di chi va da a verso b
 		var p := a + dir * _t + right * _lane_offset()
-		var y := 0.0 if bool(_edge[2]) else traffic.city.surface_at(p.x, p.y)
 		var yaw := atan2(dir.x, dir.y)
-		var basis := Basis(Vector3.UP, yaw) if bool(_edge[2]) else traffic.city.ground_basis(p.x, p.y, yaw, 5.0 if is_bus else 2.0)
+		var y: float
+		var basis: Basis
+		if bool(_edge[2]):  # ponte: dritto tra le quote dei suoi vertici
+			var ya: float = _edge[4]
+			var yb: float = _edge[5]
+			y = lerpf(ya, yb, clampf(_t / _len, 0.0, 1.0))
+			basis = Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, -atan2(yb - ya, _len))
+		else:
+			y = traffic.city.surface_at(p.x, p.y)
+			basis = traffic.city.ground_basis(p.x, p.y, yaw, 5.0 if is_bus else 2.0)
 		global_transform = Transform3D(basis, Vector3(p.x, y + 0.06, p.y))
 
 	func step(delta: float) -> void:
