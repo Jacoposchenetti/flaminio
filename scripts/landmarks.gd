@@ -599,7 +599,15 @@ func _obelisk(lm: Dictionary) -> void:
 # --- Mura Aureliane ---------------------------------------------------------------------------------
 
 
-func _city_wall(line: PackedVector2Array) -> void:
+func _city_wall(src: PackedVector2Array) -> void:
+	# Pezzi di 4 m al massimo: le mura salgono e scendono con il terreno (verso il Pincio).
+	var line := PackedVector2Array()
+	for i in src.size():
+		if i > 0:
+			var pieces := ceili(src[i - 1].distance_to(src[i]) / 4.0)
+			for k in range(1, pieces):
+				line.append(src[i - 1].lerp(src[i], float(k) / pieces))
+		line.append(src[i])
 	var acc := CityBuilder.Acc.new()
 	var height := 12.0
 	var half := 1.9

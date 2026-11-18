@@ -23,6 +23,7 @@ const AREA_COLORS := {
 
 var data: Dictionary
 var heights := PackedFloat32Array()
+var relief := PackedFloat32Array()  # rilievo senza il Tevere scavato (strade livellate, palazzi in piano)
 var hmap_w := 0
 var hmap_h := 0
 var cell := 2.0
@@ -106,6 +107,11 @@ func build() -> void:
 	hmap_w = int(data["hmap_size"][0])
 	hmap_h = int(data["hmap_size"][1])
 	heights = FileAccess.get_file_as_bytes("res://data/heights.bin").to_float32_array()
+	if FileAccess.file_exists("res://data/relief.bin"):
+		relief = FileAccess.get_file_as_bytes("res://data/relief.bin").to_float32_array()
+	else:  # dati vecchi, quartiere piatto: il rilievo è zero dove non c'è il fiume
+		relief.resize(heights.size())
+		relief.fill(0.0)
 	var bb: Array = data["bbox_m"]
 	origin = Vector2(bb[0], bb[1])
 	bbox = Rect2(origin, Vector2(bb[2] - bb[0], bb[3] - bb[1]))
@@ -113,8 +119,10 @@ func build() -> void:
 	for b: Dictionary in data.get("bridges", []):
 		_bridge_polys.append(_pts(b["p"]))
 	var sp: Array = data["spawn"]
-	spawn = Vector3(sp[0], 1.0, sp[1])
+	spawn = Vector3(sp[0], 0.0, sp[1])
+	spawn.y = surface_at(spawn.x, spawn.z) + 1.0
 	_interior_picks = Interiors.pick(data, spawn)
+	Venues.ground = surface_at
 	venues = Venues.pick(data, spawn)
 	_stone_mat = StandardMaterial3D.new()
 	_stone_mat.albedo_texture = TexLib.tex("Concrete034", "color")
@@ -161,8 +169,40 @@ func over_river(x: float, z: float) -> bool:
 	return height_at(x, z) < water_y - 0.5
 
 
-## Quota del terreno (interpolazione bilineare del rilievo).
+## Quota del terreno (interpolazione bilineare del rilievo): fondo del Tevere e banchine compresi.
 func height_at(x: float, z: float) -> float:
+	return _sample(heights, x, z)
+
+
+## Quota del rilievo senza il Tevere: dove sta la città (sopra il fiume: dove passano ponti e strade).
+func relief_at(x: float, z: float) -> float:
+	return _sample(relief, x, z)
+
+
+## Quota su cui si cammina e si guida fuori dalle banchine: il terreno, ma mai sotto il livello dei ponti.
+func surface_at(x: float, z: float) -> float:
+	return maxf(height_at(x, z), relief_at(x, z))
+
+
+## Quanto il Tevere scava sotto la città in quel punto (0 fuori dal fiume e dalle banchine, negativo dentro).
+func carve_at(x: float, z: float) -> float:
+	return height_at(x, z) - relief_at(x, z)
+
+
+## Orientamento di un mezzo appoggiato al terreno (inclinato su salite e discese), con il muso verso yaw.
+func ground_basis(x: float, z: float, yaw: float, half_len := 2.0, half_w := 0.9) -> Basis:
+	var f := Vector3(sin(yaw), 0.0, cos(yaw))
+	var r := Vector3(f.z, 0.0, -f.x)
+	f.y = (surface_at(x + f.x * half_len, z + f.z * half_len) - surface_at(x - f.x * half_len, z - f.z * half_len)) / (2.0 * half_len)
+	r.y = (surface_at(x + r.x * half_w, z + r.z * half_w) - surface_at(x - r.x * half_w, z - r.z * half_w)) / (2.0 * half_w)
+	var up := r.cross(f).normalized()
+	if up.y < 0.0:
+		up = -up
+	var fwd := (f - up * f.dot(up)).normalized()
+	return Basis(up.cross(fwd), up, fwd).orthonormalized()
+
+
+func _sample(arr: PackedFloat32Array, x: float, z: float) -> float:
 	var fx := clampf((x - origin.x) / cell, 0.0, hmap_w - 1.001)
 	var fz := clampf((z - origin.y) / cell, 0.0, hmap_h - 1.001)
 	var ix := int(fx)
@@ -170,8 +210,8 @@ func height_at(x: float, z: float) -> float:
 	var tx := fx - ix
 	var tz := fz - iz
 	var i := iz * hmap_w + ix
-	var a := lerpf(heights[i], heights[i + 1], tx)
-	var b := lerpf(heights[i + hmap_w], heights[i + hmap_w + 1], tx)
+	var a := lerpf(arr[i], arr[i + 1], tx)
+	var b := lerpf(arr[i + hmap_w], arr[i + hmap_w + 1], tx)
 	return lerpf(a, b, tz)
 
 
@@ -268,9 +308,11 @@ func _push(by_chunk: Dictionary, xf: Transform3D) -> void:
 
 func _build_terrain() -> void:
 	var img := Image.create_from_data(hmap_w, hmap_h, false, Image.FORMAT_RF, heights.to_byte_array())
+	var rimg := Image.create_from_data(hmap_w, hmap_h, false, Image.FORMAT_RF, relief.to_byte_array())
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://shaders/terrain.gdshader")
 	mat.set_shader_parameter("heights", ImageTexture.create_from_image(img))
+	mat.set_shader_parameter("relief_map", ImageTexture.create_from_image(rimg))
 	mat.set_shader_parameter("origin", origin - Vector2(cell, cell) * 0.5)
 	mat.set_shader_parameter("extent", Vector2(hmap_w, hmap_h) * cell)
 	mat.set_shader_parameter("ground_albedo", TexLib.tex("Concrete034", "color"))
@@ -286,7 +328,7 @@ func _build_terrain() -> void:
 	plane.material = mat
 	var mi := _add_mesh(plane, "Terreno", false)
 	mi.position = Vector3(center.x, 0, center.y)
-	mi.extra_cull_margin = 8.0
+	mi.extra_cull_margin = 64.0  # il terreno sale fino a +45 m (colline) e scende a -14 (Tevere)
 
 	# Cornice di terreno attorno alla mappa, per non vedere il vuoto all'orizzonte.
 	var omat := StandardMaterial3D.new()
@@ -294,20 +336,41 @@ func _build_terrain() -> void:
 	omat.albedo_color = Color(0.75, 0.72, 0.66)
 	omat.uv1_triplanar = true
 	omat.uv1_scale = Vector3(0.3, 0.3, 0.3)
+	# Il bordo segue il rilievo (a est le colline) e si allunga piano verso l'orizzonte.
 	var far := 4000.0
 	var lo := origin
 	var hi := origin + size
-	for r: Rect2 in [
-		Rect2(lo.x - far, lo.y - far, size.x + far * 2, far),  # nord
-		Rect2(lo.x - far, hi.y, size.x + far * 2, far),  # sud
-		Rect2(lo.x - far, lo.y, far, size.y),  # ovest
-		Rect2(hi.x, lo.y, far, size.y),  # est
-	]:
-		var outer := PlaneMesh.new()
-		outer.size = r.size
-		outer.material = omat
-		var omi := _add_mesh(outer, "Dintorni", false)
-		omi.position = Vector3(r.get_center().x, -0.02, r.get_center().y)
+	var ring := PackedVector2Array()
+	var step := 20.0
+	var x := lo.x
+	while x < hi.x:
+		ring.append(Vector2(x, lo.y))
+		x += step
+	var zz := lo.y
+	while zz < hi.y:
+		ring.append(Vector2(hi.x, zz))
+		zz += step
+	x = hi.x
+	while x > lo.x:
+		ring.append(Vector2(x, hi.y))
+		x -= step
+	zz = hi.y
+	while zz > lo.y:
+		ring.append(Vector2(lo.x, zz))
+		zz -= step
+	var mid := (lo + hi) * 0.5
+	var skirt := Acc.new()
+	var zero := Vector2.ZERO
+	for i in ring.size():
+		var a := ring[i]
+		var b := ring[(i + 1) % ring.size()]
+		var ya := relief_at(a.x, a.y) - 0.02
+		var yb := relief_at(b.x, b.y) - 0.02
+		var oa := a + (a - mid).normalized() * far
+		var ob := b + (b - mid).normalized() * far
+		skirt.quad(Vector3(a.x, ya, a.y), Vector3(oa.x, ya * 0.5, oa.y), Vector3(ob.x, yb * 0.5, ob.y), Vector3(b.x, yb, b.y),
+			Vector3.UP, Color.WHITE, zero, zero, zero, zero, zero)
+	_add_mesh(skirt.mesh(omat), "Dintorni", false)
 
 	# Collisione: rilievo scalato in modo uniforme (le altezze vanno divise per la cella).
 	var shape := HeightMapShape3D.new()
@@ -358,26 +421,70 @@ func _build_areas() -> void:
 		elif kind == "water":
 			acc = water
 			var c := pts[0]
-			y = water_y if height_at(c.x, c.y) < water_y or pts.size() > 60 else 0.25
+			var river := carve_at(c.x, c.y) < -0.5 or (pts.size() > 60 and _mostly_river(pts))
+			y = water_y if river else relief_at(c.x, c.y) + 0.25
 		for i in range(0, idx.size(), 3):
-			var p := [pts[idx[i]], pts[idx[i + 1]], pts[idx[i + 2]]]
-			var v := []
-			for q: Vector2 in p:
-				var yy := y if kind == "water" else height_at(q.x, q.y) + y
-				v.append(Vector3(q.x, yy, q.y))
-			acc.tri(v[0], v[1], v[2], Vector3.UP, col, p[0], p[1], p[2], far)
+			_area_tri(acc, pts[idx[i]], pts[idx[i + 1]], pts[idx[i + 2]], y, kind == "water", col, far, 0)
 	var gmat := ShaderMaterial.new()
 	gmat.shader = load("res://shaders/grass.gdshader")
 	gmat.set_shader_parameter("grass_albedo", TexLib.tex("Grass004", "color"))
 	gmat.set_shader_parameter("grass_normal", TexLib.tex("Grass004", "normal"))
 	if not green.v.is_empty():
 		_add_mesh(green.mesh(gmat), "Verde", false)
+		if "--timing" in OS.get_cmdline_user_args():
+			print("  triangoli: verde %d, piazze %d" % [green.v.size() / 3, plaza.v.size() / 3])
 	if not plaza.v.is_empty():
 		_add_mesh(plaza.mesh(_road_material()), "Piazze", false)
 	var wmat := ShaderMaterial.new()
 	wmat.shader = load("res://shaders/water.gdshader")
 	if not water.v.is_empty():
 		_add_mesh(water.mesh(wmat), "Acqua", false)
+
+
+## Triangolo di un'area (prato, piazza) adagiato sul terreno: si divide finché il rilievo è seguito bene.
+func _area_tri(acc: Acc, a: Vector2, b: Vector2, c: Vector2, y: float, flat: bool, col: Color, far: Vector2, depth: int) -> void:
+	if flat:
+		acc.tri(Vector3(a.x, y, a.y), Vector3(b.x, y, b.y), Vector3(c.x, y, c.y), Vector3.UP, col, a, b, c, far)
+		return
+	var ha := height_at(a.x, a.y)
+	var hb := height_at(b.x, b.y)
+	var hc := height_at(c.x, c.y)
+	var longest := maxf(a.distance_to(b), maxf(b.distance_to(c), c.distance_to(a)))
+	if depth < 6 and longest > 10.0:
+		var m := (a + b + c) / 3.0
+		var mab := (a + b) * 0.5
+		var mbc := (b + c) * 0.5
+		var mca := (c + a) * 0.5
+		var ra := relief_at(a.x, a.y)
+		var rb := relief_at(b.x, b.y)
+		var rc := relief_at(c.x, c.y)
+		var err := absf(relief_at(m.x, m.y) - (ra + rb + rc) / 3.0)
+		err = maxf(err, absf(relief_at(mab.x, mab.y) - (ra + rb) * 0.5))
+		err = maxf(err, absf(relief_at(mbc.x, mbc.y) - (rb + rc) * 0.5))
+		err = maxf(err, absf(relief_at(mca.x, mca.y) - (rc + ra) * 0.5))
+		if err > 0.3:
+			_area_tri(acc, a, mab, mca, y, flat, col, far, depth + 1)
+			_area_tri(acc, mab, b, mbc, y, flat, col, far, depth + 1)
+			_area_tri(acc, mca, mbc, c, y, flat, col, far, depth + 1)
+			_area_tri(acc, mab, mbc, mca, y, flat, col, far, depth + 1)
+			return
+	# In pendenza un filo più alto: il terreno (maglia di 4 m) non deve bucare il prato.
+	var lift := y + (0.02 if maxf(ha, maxf(hb, hc)) - minf(ha, minf(hb, hc)) > 0.3 else 0.0)  # sempre sotto le strade
+	var va := Vector3(a.x, ha + lift, a.y)
+	var vb := Vector3(b.x, hb + lift, b.y)
+	var vc := Vector3(c.x, hc + lift, c.y)
+	var nrm := (vb - va).cross(vc - va).normalized()
+	if nrm.y < 0.0:
+		nrm = -nrm
+	acc.tri(va, vb, vc, nrm if nrm.y > 0.2 else Vector3.UP, col, a, b, c, far)
+
+
+func _mostly_river(pts: PackedVector2Array) -> bool:
+	var n := 0
+	for q in pts:
+		if carve_at(q.x, q.y) < -0.5:
+			n += 1
+	return n * 2 > pts.size()
 
 
 # --- Strade -----------------------------------------------------------------------------------
@@ -469,9 +576,9 @@ func _build_roads() -> void:
 			var off := m * (w * 0.5) / maxf(m.dot(ref), 0.5)
 			if i > 0:
 				u += seg_len[i]
-			var ground := height_at(p.x, p.y)
-			if is_bridge or kind != "foot":
-				ground = maxf(ground, 0.0)  # carreggiate e ponti restano in quota; i vialetti scendono in banchina
+			# Carreggiate e ponti restano alla quota della città; i vialetti scendono in banchina.
+			var keep_up := is_bridge or kind != "foot"
+			var ground := surface_at(p.x, p.y) if keep_up else height_at(p.x, p.y)
 			var y := ground + yoff
 			var l := Vector3(p.x + off.x, y, p.y + off.y)
 			var rr := Vector3(p.x - off.x, y, p.y - off.y)
@@ -481,10 +588,25 @@ func _build_roads() -> void:
 				# UV2 per vertice: (dist. dall'incrocio precedente, dist. dal successivo).
 				var s_a := Vector2(dp[i - 1], dn[i] + length)
 				var s_b := Vector2(dp[i - 1] + length, dn[i])
-				acc.quad(
-					prev_l, prev_r, rr, l, Vector3.UP, col,
-					Vector2(prev_u, 1), Vector2(prev_u, -1), Vector2(u, -1), Vector2(u, 1), s_a, s_a, s_b, s_b
-				)
+				var pieces := 1 if is_bridge else _pieces_needed(a, p, keep_up, length)
+				var pl := prev_l
+				var pr := prev_r
+				for k in range(1, pieces + 1):
+					var t := float(k) / pieces
+					var nl3 := prev_l.lerp(l, t)
+					var nr3 := prev_r.lerp(rr, t)
+					if k < pieces:
+						var cq := a.lerp(p, t)
+						nl3.y = (surface_at(cq.x, cq.y) if keep_up else height_at(cq.x, cq.y)) + yoff
+						nr3.y = nl3.y
+					var t0 := float(k - 1) / pieces
+					acc.quad(
+						pl, pr, nr3, nl3, Vector3.UP, col,
+						Vector2(lerpf(prev_u, u, t0), 1), Vector2(lerpf(prev_u, u, t0), -1), Vector2(lerpf(prev_u, u, t), -1),
+						Vector2(lerpf(prev_u, u, t), 1), s_a.lerp(s_b, t0), s_a.lerp(s_b, t0), s_a.lerp(s_b, t), s_a.lerp(s_b, t)
+					)
+					pl = nl3
+					pr = nr3
 				if is_bridge and not on_bridge((a + p) * 0.5):
 					_bridge_segment(bridge_body, a, p, w, _stone_mat)
 				elif kind == "road" and w >= 6.0 and length > 0.5:
@@ -494,7 +616,7 @@ func _build_roads() -> void:
 						var dir := (p - a) / length
 						var nrm2 := Vector2(-dir.y, dir.x)
 						for side in [1.0, -1.0]:
-							_curb(curbs, a + dir * s0, a + dir * s1, nrm2 * side, w * 0.5, y - yoff)
+							_curb(curbs, a + dir * s0, a + dir * s1, nrm2 * side, w * 0.5)
 					if w >= 7.0 and length > 12.0:
 						_add_parking(a, p, length, dp[i - 1], dn[i], w, y - yoff)
 					if w >= 8.0:
@@ -507,7 +629,7 @@ func _build_roads() -> void:
 								var pos2 := q + nrm3 * (w * 0.5 + 0.8)
 								var face := -nrm3
 								var basis := Basis(Vector3(face.x, 0, face.y), Vector3.UP, Vector3(-face.y, 0, face.x))
-								var xf := Transform3D(basis.orthonormalized(), Vector3(pos2.x, y - yoff, pos2.y))
+								var xf := Transform3D(basis.orthonormalized(), Vector3(pos2.x, surface_at(pos2.x, pos2.y), pos2.y))
 								_push(lamps, xf)
 								_push(lamps_far, xf)
 								lamp_side = -lamp_side
@@ -531,6 +653,8 @@ func _build_roads() -> void:
 					_names[key] = []
 				_names[key].append([pts[i - 1], p, r["n"]])
 	_add_mesh(acc.mesh(_road_material()), "Strade", false)
+	if "--timing" in OS.get_cmdline_user_args():
+		print("  triangoli: strade %d, cordoli %d" % [acc.v.size() / 3, curbs.v.size() / 3])
 	_add_mesh(curbs.mesh(_stone_mat), "Cordoli", false)
 	var lamp_mesh := _lamp_mesh(true)
 	_add_multimesh_chunks(lamp_mesh, lamps, "Lampioni", 0.0, NEAR_RANGE)
@@ -549,29 +673,52 @@ func _add_parking(a: Vector2, b: Vector2, length: float, d_prev: float, d_next: 
 			var q := a + dir * s + nrm * side * (w * 0.5 - 1.0)
 			var fwd := dir * (1.0 if side > 0.0 else -1.0)  # nrm è il lato destro di dir: si parcheggia nel senso di marcia
 			var basis := Basis(Vector3(fwd.y, 0, -fwd.x), Vector3.UP, Vector3(fwd.x, 0, fwd.y))
-			parking.append(Transform3D(basis, Vector3(q.x, ground + 0.05, q.y)))
+			var yaw := atan2(fwd.x, fwd.y)
+			var c := a + dir * s
+			var bs := ground_basis(q.x, q.y, yaw)
+			# Niente posti sui tornanti in collina: l'auto finirebbe mezza dentro la scarpata.
+			if bs.y.y > 0.985 and absf(surface_at(q.x, q.y) - surface_at(c.x, c.y)) < 0.2:
+				parking.append(Transform3D(bs, Vector3(q.x, surface_at(q.x, q.y) + 0.05, q.y)))
 		s += 6.5
 
 
-## Cordolo del marciapiede lungo un lato della carreggiata: alto 15 cm, largo 25.
-func _curb(acc: Acc, a: Vector2, b: Vector2, side: Vector2, half: float, ground: float) -> void:
-	var inner_a := a + side * half
-	var inner_b := b + side * half
-	var outer_a := a + side * (half + 0.25)
-	var outer_b := b + side * (half + 0.25)
-	var top := ground + 0.15
-	var lo := ground
+## Pezzi (di ~3 m) in cui dividere un tratto perché segua il terreno: 1 se il profilo è già una retta.
+func _pieces_needed(a: Vector2, b: Vector2, keep_up: bool, length: float) -> int:
+	if length < 4.0:
+		return 1
+	var ha := surface_at(a.x, a.y) if keep_up else height_at(a.x, a.y)
+	var hb := surface_at(b.x, b.y) if keep_up else height_at(b.x, b.y)
+	var dev := 0.0
+	for t: float in [0.25, 0.5, 0.75]:
+		var q := a.lerp(b, t)
+		var hq := surface_at(q.x, q.y) if keep_up else height_at(q.x, q.y)
+		dev = maxf(dev, absf(hq - lerpf(ha, hb, t)))
+	return 1 if dev < 0.03 else maxi(1, ceili(length / 3.0))
+
+
+## Cordolo del marciapiede lungo un lato della carreggiata: alto 15 cm, largo 25; segue salite e discese.
+func _curb(acc: Acc, a: Vector2, b: Vector2, side: Vector2, half: float) -> void:
 	var nrm := Vector3(-side.x, 0, -side.y)
 	var z := Vector2.ZERO
 	var wc := Color.WHITE
-	acc.quad(
-		Vector3(inner_a.x, lo, inner_a.y), Vector3(inner_b.x, lo, inner_b.y),
-		Vector3(inner_b.x, top, inner_b.y), Vector3(inner_a.x, top, inner_a.y), nrm, wc, z, z, z, z, z
-	)
-	acc.quad(
-		Vector3(inner_a.x, top, inner_a.y), Vector3(inner_b.x, top, inner_b.y),
-		Vector3(outer_b.x, top, outer_b.y), Vector3(outer_a.x, top, outer_a.y), Vector3.UP, wc, z, z, z, z, z
-	)
+	var pieces := _pieces_needed(a, b, true, a.distance_to(b))
+	for k in pieces:
+		var pa := a.lerp(b, float(k) / pieces)
+		var pb := a.lerp(b, float(k + 1) / pieces)
+		var ga := surface_at(pa.x, pa.y)
+		var gb := surface_at(pb.x, pb.y)
+		var inner_a := pa + side * half
+		var inner_b := pb + side * half
+		var outer_a := pa + side * (half + 0.25)
+		var outer_b := pb + side * (half + 0.25)
+		acc.quad(
+			Vector3(inner_a.x, ga, inner_a.y), Vector3(inner_b.x, gb, inner_b.y),
+			Vector3(inner_b.x, gb + 0.15, inner_b.y), Vector3(inner_a.x, ga + 0.15, inner_a.y), nrm, wc, z, z, z, z, z
+		)
+		acc.quad(
+			Vector3(inner_a.x, ga + 0.15, inner_a.y), Vector3(inner_b.x, gb + 0.15, inner_b.y),
+			Vector3(outer_b.x, gb + 0.15, outer_b.y), Vector3(outer_a.x, ga + 0.15, outer_a.y), Vector3.UP, wc, z, z, z, z, z
+		)
 
 
 ## Lampione romano: palo alto con braccio verso la strada (+X locale).
@@ -693,6 +840,11 @@ func _build_buildings() -> void:
 		var ground := height_at(center.x, center.y)
 		var modern: bool = b.get("style", "") == "modern"
 		var y0 := ground - 0.4 + float(b.get("m", 0.0))
+		var foot := y0  # piede del muro: in discesa scende sotto il piano del palazzo
+		if not b.has("m"):
+			for q in pts:
+				var o := q + (q - center).normalized() * 1.5
+				foot = minf(foot, minf(height_at(q.x, q.y), surface_at(o.x, o.y)) - 0.4)
 		var y1 := ground + h
 		var tall := h > 6.5 and not modern and not b.has("m")
 		var key := _chunk_key(center)
@@ -722,7 +874,7 @@ func _build_buildings() -> void:
 			if b.has("venue") and int(venues[int(b["venue"])]["edge"]) == i:
 				# Facciata del locale: porta e vetrine aperte al piano terra.
 				var vn: Dictionary = venues[int(b["venue"])]
-				var g_off := maxf(height_at(center.x, center.y), 0.0) - y0
+				var g_off := surface_at(center.x, center.y) - y0
 				for r: Array in Venues.facade_rects(vn, length, g_off, top - y0):
 					var p0 := a + dir * float(r[0])
 					var p1 := a + dir * float(r[1])
@@ -734,8 +886,8 @@ func _build_buildings() -> void:
 					)
 			else:
 				acc.quad(
-					Vector3(a.x, y0, a.y), Vector3(c.x, y0, c.y), Vector3(c.x, top, c.y), Vector3(a.x, top, a.y),
-					nrm, col, Vector2(u, 0), Vector2(u + length, 0), Vector2(u + length, top - y0), Vector2(u, top - y0), u2
+					Vector3(a.x, foot, a.y), Vector3(c.x, foot, c.y), Vector3(c.x, top, c.y), Vector3(a.x, top, a.y),
+					nrm, col, Vector2(u, foot - y0), Vector2(u + length, foot - y0), Vector2(u + length, top - y0), Vector2(u, top - y0), u2
 				)
 			if tall:
 				# Cornicione sporgente sotto il parapetto.
@@ -1000,10 +1152,10 @@ func _build_bounds() -> void:
 	var c := bbox.get_center()
 	var s := bbox.size
 	for e: Array in [
-		[Vector3(s.x, 60, 2), Vector3(c.x, 20, bbox.position.y)],
-		[Vector3(s.x, 60, 2), Vector3(c.x, 20, bbox.end.y)],
-		[Vector3(2, 60, s.y), Vector3(bbox.position.x, 20, c.y)],
-		[Vector3(2, 60, s.y), Vector3(bbox.end.x, 20, c.y)],
+		[Vector3(s.x, 200, 2), Vector3(c.x, 70, bbox.position.y)],
+		[Vector3(s.x, 200, 2), Vector3(c.x, 70, bbox.end.y)],
+		[Vector3(2, 200, s.y), Vector3(bbox.position.x, 70, c.y)],
+		[Vector3(2, 200, s.y), Vector3(bbox.end.x, 70, c.y)],
 	]:
 		var shape := BoxShape3D.new()
 		shape.size = e[0]

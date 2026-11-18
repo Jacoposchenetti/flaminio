@@ -100,7 +100,7 @@ func _place_dealers(city: CityBuilder) -> void:
 		if pts.size() < 2:
 			continue
 		var mid := pts[pts.size() / 2]
-		if city.height_at(mid.x, mid.y) < -0.3:
+		if city.carve_at(mid.x, mid.y) < -0.3:
 			continue  # niente banchine del Tevere
 		cands.append(mid)
 	for target: float in [600.0, 1300.0]:
@@ -117,7 +117,7 @@ func _place_dealers(city: CityBuilder) -> void:
 				best_d = d
 				best = c
 		if best != Vector2.INF:
-			var pos := Vector3(best.x, maxf(city.height_at(best.x, best.y), 0.0), best.y)
+			var pos := Vector3(best.x, city.surface_at(best.x, best.y), best.y)
 			shops.append({"kind": "dealer", "pos": pos, "name": "Fornitore · " + city.street_name(pos, 80.0) if city.street_name(pos, 80.0) != "" else "Fornitore", "door": best})
 
 
@@ -136,7 +136,7 @@ func _sidewalk(city: CityBuilder, at: Vector2) -> Vector3:
 				best_d = d
 				var off := (at - q).normalized() * (float(r["w"]) * 0.5 + 1.4) if d > 0.1 else Vector2.ZERO
 				best = q + off
-	return Vector3(best.x, maxf(city.height_at(best.x, best.y), 0.0), best.y)
+	return Vector3(best.x, city.surface_at(best.x, best.y), best.y)
 
 
 func _marker(s: Dictionary) -> void:

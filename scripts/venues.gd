@@ -22,6 +22,10 @@ const SIGN := {"bar": Color(1.0, 0.65, 0.2), "pharmacy": Color(0.2, 1.0, 0.45), 
 
 
 ## Sceglie i locali e segna i palazzi che li ospitano con "venue" (indice nella lista restituita).
+## Quota del terreno (la imposta CityBuilder prima di pick): la porta deve stare a livello del marciapiede.
+static var ground: Callable
+
+
 static func pick(data: Dictionary, spawn: Vector3) -> Array:
 	var blds: Array = data["buildings"]
 	var polys := []
@@ -90,64 +94,77 @@ static func _poly(b: Dictionary) -> PackedVector2Array:
 ## Trova il palazzo e il lato della facciata per il locale; {} se non c'è posto.
 static func _place(kind: String, poi: Array, blds: Array, polys: Array, boxes: Array) -> Dictionary:
 	var at := Vector2(poi[0], poi[1])
-	var bid := -1
-	var best_d := 14.0
+	# Palazzi candidati: quello del locale vero, poi i vicini (entro 30 m), dal più vicino.
+	var cands := []
 	for i in blds.size():
 		var b: Dictionary = blds[i]
 		if b.has("enter") or b.has("venue") or b.has("part") or b.has("dome") or b.get("style", "") != "" or float(b["h"]) < 4.0:
 			continue
-		if not (boxes[i] as Rect2).grow(14.0).has_point(at):
+		if not (boxes[i] as Rect2).grow(30.0).has_point(at):
 			continue
 		var p: PackedVector2Array = polys[i]
 		if Geometry2D.triangulate_polygon(p).is_empty():
 			continue
-		if Geometry2D.is_point_in_polygon(at, p):
-			bid = i
-			break
-		for k in p.size():
-			var d := Geometry2D.get_closest_point_to_segment(at, p[k], p[(k + 1) % p.size()]).distance_to(at)
-			if d < best_d:
-				best_d = d
-				bid = i
-	if bid < 0:
-		return {}
-	var p: PackedVector2Array = polys[bid]
-	# Il lato lungo abbastanza più vicino al punto reale del locale (di solito la facciata su strada).
-	var edge := -1
-	var ed := INF
+		var d := 0.0
+		if not Geometry2D.is_point_in_polygon(at, p):
+			d = INF
+			for k in p.size():
+				d = minf(d, Geometry2D.get_closest_point_to_segment(at, p[k], p[(k + 1) % p.size()]).distance_to(at))
+		if d <= 30.0:
+			cands.append([d, i])
+	cands.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
+	for cb: Array in cands.slice(0, 6):
+		var v := _place_in(kind, poi, at, int(cb[1]), polys[int(cb[1])])
+		if not v.is_empty():
+			return v
+	return {}
+
+
+## Il locale nel palazzo bid: sul lato lungo abbastanza più vicino al punto vero, con la porta a livello della strada.
+static func _place_in(kind: String, poi: Array, at: Vector2, bid: int, p: PackedVector2Array) -> Dictionary:
+	var edges := []
 	for k in p.size():
 		var a := p[k]
 		var c := p[(k + 1) % p.size()]
-		if a.distance_to(c) < ROOM_W + 1.2:
-			continue
-		var d := Geometry2D.get_closest_point_to_segment(at, a, c).distance_to(at)
-		if d < ed:
-			ed = d
-			edge = k
-	if edge < 0:
-		return {}
-	var a := p[edge]
-	var c := p[(edge + 1) % p.size()]
-	var length := a.distance_to(c)
-	var u := (c - a) / length
-	var n_in := Vector2(-u.y, u.x)
-	if not Geometry2D.is_point_in_polygon((a + c) * 0.5 + n_in * 1.0, p):
-		n_in = -n_in
-	var t := clampf((at - a).dot(u), ROOM_W * 0.5 + 0.6, length - ROOM_W * 0.5 - 0.6)
-	for depth: float in [6.5, 5.0]:
-		var e0 := a + u * (t - ROOM_W * 0.5)
-		var e1 := a + u * (t + ROOM_W * 0.5)
-		var ok := true
-		for q: Vector2 in [e0 + n_in * depth, e1 + n_in * depth, (e0 + e1) * 0.5 + n_in * depth, e0 + n_in * 1.0, e1 + n_in * 1.0]:
-			if not Geometry2D.is_point_in_polygon(q, p):
-				ok = false
-		if ok:
-			var title: String = TITLES[kind]
-			return {
-				"kind": kind, "name": title if String(poi[2]).to_lower() == title.to_lower() else "%s · %s" % [title, poi[2]],
-				"real": String(poi[2]), "bid": bid, "edge": edge,
-				"t0": t - ROOM_W * 0.5, "t1": t + ROOM_W * 0.5, "a": a, "u": u, "n_in": n_in, "depth": depth,
-			}
+		if a.distance_to(c) >= ROOM_W + 1.2:
+			edges.append([Geometry2D.get_closest_point_to_segment(at, a, c).distance_to(at), k])
+	edges.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
+	for ek: Array in edges:
+		if float(ek[0]) > float(edges[0][0]) + 12.0:
+			break  # solo le facciate verso il punto vero (non quelle sul cortile dietro)
+		var edge := int(ek[1])
+		var a := p[edge]
+		var c := p[(edge + 1) % p.size()]
+		var length := a.distance_to(c)
+		var u := (c - a) / length
+		var n_in := Vector2(-u.y, u.x)
+		if not Geometry2D.is_point_in_polygon((a + c) * 0.5 + n_in * 1.0, p):
+			n_in = -n_in
+		var t := clampf((at - a).dot(u), ROOM_W * 0.5 + 0.6, length - ROOM_W * 0.5 - 0.6)
+		if ground.is_valid():
+			# In collina: niente locali con la porta sopra o sotto il marciapiede (servirebbero scale).
+			var door := a + u * t
+			var outside: float = ground.call(door.x - n_in.x * 2.5, door.y - n_in.y * 2.5)
+			var inside: float = ground.call(door.x + n_in.x * 2.0, door.y + n_in.y * 2.0)
+			var further: float = ground.call(door.x - n_in.x * 6.0, door.y - n_in.y * 6.0)
+			if absf(outside - inside) > 0.4 or absf(further - inside) > 0.9:
+				continue
+		for depth: float in [6.5, 5.0]:
+			var e0 := a + u * (t - ROOM_W * 0.5)
+			var e1 := a + u * (t + ROOM_W * 0.5)
+			var ok := true
+			for q: Vector2 in [e0 + n_in * depth, e1 + n_in * depth, (e0 + e1) * 0.5 + n_in * depth, e0 + n_in * 1.0, e1 + n_in * 1.0]:
+				if not Geometry2D.is_point_in_polygon(q, p):
+					ok = false
+			if ok:
+				var title: String = TITLES[kind]
+				return {
+					"kind": kind, "name": title if String(poi[2]).to_lower() == title.to_lower() else "%s · %s" % [title, poi[2]],
+					"real": String(poi[2]), "bid": bid, "edge": edge,
+					"t0": t - ROOM_W * 0.5, "t1": t + ROOM_W * 0.5, "a": a, "u": u, "n_in": n_in, "depth": depth,
+				}
+		if not ground.is_valid():
+			break  # senza quote: solo la facciata più vicina, come prima
 	return {}
 
 
@@ -192,7 +209,7 @@ static func build_room(city: CityBuilder, v: Dictionary) -> Dictionary:
 	var kind: String = v["kind"]
 	var o := a + u * t0  # angolo della stanza sulla facciata
 	var g := city.height_at(o.x + n.x * 2.0, o.y + n.y * 2.0)
-	g = maxf(g, 0.0)
+	g = maxf(g, city.relief_at(o.x + n.x * 2.0, o.y + n.y * 2.0))  # mai sotto la città (banchine)
 	var to3 := func(x: float, z: float, y: float) -> Vector3:
 		var p := o + u * x + n * z
 		return Vector3(p.x, g + y, p.y)

@@ -81,7 +81,7 @@ func setup(city: CityBuilder) -> void:
 		var xf: Transform3D = city.parking[k]
 		var side := -xf.basis.x.normalized()  # -X dell'auto parcheggiata guarda il cordolo
 		var p := xf.origin + side * 2.2
-		p.y = maxf(city.height_at(p.x, p.z), 0.0) + 0.06
+		p.y = city.surface_at(p.x, p.z) + 0.06
 		var n := make_node(i % COLORS.size())
 		n.set_meta("id", i)
 		n.set_meta("color", i % COLORS.size())

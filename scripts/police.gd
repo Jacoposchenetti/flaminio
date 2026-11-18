@@ -273,10 +273,10 @@ func _spawn_patrol(target: Player) -> void:
 		var p := around + Vector3(cos(a), 0, sin(a)) * r
 		if Vector2(p.x - me.x, p.z - me.z).length() < 100.0:
 			continue
-		var ground := city.height_at(p.x, p.z)
-		if ground < -0.3:
-			continue
-		var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, 80.0, p.z), Vector3(p.x, -20.0, p.z), 1)
+		var ground := city.surface_at(p.x, p.z)
+		if city.carve_at(p.x, p.z) < -0.3:
+			continue  # niente banchine del Tevere
+		var q := PhysicsRayQueryParameters3D.create(Vector3(p.x, ground + 90.0, p.z), Vector3(p.x, ground - 20.0, p.z), 1)
 		var hit := space.intersect_ray(q)
 		if hit.is_empty() or float(hit["position"].y) > ground + 0.6:
 			continue
@@ -591,7 +591,7 @@ class PoliceCar:
 		_route = route
 		_k = 0
 		var p := police._astar.get_point_position(route[0])
-		global_position = Vector3(p.x, maxf(police.city.height_at(p.x, p.y), 0.0) + 0.06, p.y)
+		global_position = Vector3(p.x, police.city.surface_at(p.x, p.y) + 0.06, p.y)
 
 	func _physics_process(delta: float) -> void:
 		if destroyed:
@@ -630,8 +630,8 @@ class PoliceCar:
 		var blocked := police.traffic.blocked(global_position + Vector3(0, 0.5, 0), dir, 7.0, self)
 		_speed = move_toward(_speed, 5.0 if blocked else 22.0, delta * (10.0 if blocked else 5.0))
 		var p := global_position + dir * _speed * delta
-		p.y = maxf(police.city.height_at(p.x, p.z), 0.0) + 0.06
-		var q := Basis(Vector3.UP, atan2(dir.x, dir.z)).get_rotation_quaternion()
+		p.y = police.city.surface_at(p.x, p.z) + 0.06
+		var q := police.city.ground_basis(p.x, p.z, atan2(dir.x, dir.z)).get_rotation_quaternion()  # inclinata in salita
 		global_transform = Transform3D(Basis(global_basis.get_rotation_quaternion().slerp(q, 1.0 - exp(-6.0 * delta))), p)
 
 	func _arrive(with_cops: bool) -> void:

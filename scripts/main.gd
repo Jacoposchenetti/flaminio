@@ -658,7 +658,7 @@ func _start_playing() -> void:
 		var xz: PackedStringArray = _args["pos"].split(",")
 		var x := float(xz[0])
 		var z := float(xz[1])
-		player.teleport(Vector3(x, maxf(city.height_at(x, z), 0.0) + 1.0, z))
+		player.teleport(Vector3(x, city.surface_at(x, z) + 1.0, z))
 	if _args.has("yaw"):
 		player.cam_yaw = deg_to_rad(float(_args["yaw"]))
 	if _args.has("pitch"):
@@ -1374,10 +1374,18 @@ func _process(delta: float) -> void:
 		_args["drove"] = true  # prova automatica: sale sull'auto più vicina (--drive=go: e accelera)
 		var c := _nearest_car(200.0, true)
 		if c:
+			if _args.has("hilltest"):  # prova in salita: --hilltest=x,z,gradi (l'auto parte lì, muso verso gradi)
+				var hv: PackedStringArray = String(_args["hilltest"]).split(",")
+				var hx := float(hv[0])
+				var hz := float(hv[1])
+				c.global_transform = Transform3D(city.ground_basis(hx, hz, deg_to_rad(float(hv[2]))), Vector3(hx, city.surface_at(hx, hz) + 0.7, hz))
 			player.teleport(c.global_position + Vector3(0, 0.5, 0))
 			_toggle_car()
 			if _args["drive"] == "go":
 				Input.action_press("move_forward")
+	if player and _args.has("drive") and player.vehicle and _frame % 60 == 0:
+		var v := player.vehicle
+		print("guida: pos %s  quota terreno %.1f  velocità %.0f km/h" % [v.global_position.round(), city.surface_at(v.global_position.x, v.global_position.z), v.linear_velocity.length() * 3.6])
 	if _args.has("say") and _time > 8.0 and _online_now() and not _args.has("said"):
 		_args["said"] = true  # prova automatica della chat
 		_on_chat_submitted(_args["say"])
@@ -1446,6 +1454,8 @@ func _process(delta: float) -> void:
 		var room: Dictionary = city.venue_rooms[int(f[0])]
 		var inside := f.size() > 1
 		var at: Vector3 = room["counter_front"] if inside else room["entrance"] + ((room["entrance"] as Vector3) - (room["counter_front"] as Vector3)).normalized() * 6.0
+		if not inside:
+			at.y = city.surface_at(at.x, at.z)
 		player.teleport(at + Vector3(0, 0.3, 0))
 		var look: Vector3 = (room["clerk"] as Vector3) - at
 		player.cam_yaw = atan2(-look.x, -look.z)
@@ -1562,7 +1572,7 @@ func _process(delta: float) -> void:
 			var b: Node3D = buses[0]
 			_args["bus_ref"] = [b, b.global_position, _time]
 			var side := b.global_transform * Vector3(-9.0, 0, 6.0)
-			player.teleport(Vector3(side.x, maxf(city.height_at(side.x, side.z), 0.0) + 1.0, side.z))
+			player.teleport(Vector3(side.x, city.surface_at(side.x, side.z) + 1.0, side.z))
 			var to := b.global_position - side
 			player.cam_yaw = atan2(-to.x, -to.z) + 0.25
 			player.cam_pitch = -0.05
@@ -1617,7 +1627,7 @@ func _shot_tour() -> void:
 	if _shot_wait == 0:
 		var x := float(f[1])
 		var z := float(f[2])
-		player.teleport(Vector3(x, maxf(city.height_at(x, z), 0.0) + 1.0, z))
+		player.teleport(Vector3(x, city.surface_at(x, z) + 1.0, z))
 		player.cam_yaw = deg_to_rad(float(f[3]))
 		player.cam_pitch = deg_to_rad(float(f[4]))
 		player.set_zoom(float(f[5]))
@@ -1740,7 +1750,7 @@ func _escape_test() -> void:
 				var cops := get_tree().get_nodes_in_group("cop").size()
 				print("fuga: t=%d stelle %d agenti %d, ora scappo a 600 m" % [int(_time), int(_my_wanted()[0]), cops])
 				var p := player.global_position + Vector3(450, 0, 400)
-				player.teleport(Vector3(p.x, maxf(city.height_at(p.x, p.z), 0.0) + 1.0, p.z))
+				player.teleport(Vector3(p.x, city.surface_at(p.x, p.z) + 1.0, p.z))
 				_esc_next = _time
 				_esc_step = 2
 		2:

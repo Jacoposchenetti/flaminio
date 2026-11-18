@@ -291,9 +291,10 @@ class TrafficCar:
 		var dir := (b - a) / _len
 		var right := Vector2(-dir.y, dir.x)  # z verso sud: questo è il lato destro di chi va da a verso b
 		var p := a + dir * _t + right * _lane_offset()
-		var y := 0.0 if bool(_edge[2]) else maxf(traffic.city.height_at(p.x, p.y), 0.0)
+		var y := 0.0 if bool(_edge[2]) else traffic.city.surface_at(p.x, p.y)
 		var yaw := atan2(dir.x, dir.y)
-		global_transform = Transform3D(Basis(Vector3.UP, yaw), Vector3(p.x, y + 0.06, p.y))
+		var basis := Basis(Vector3.UP, yaw) if bool(_edge[2]) else traffic.city.ground_basis(p.x, p.y, yaw, 5.0 if is_bus else 2.0)
+		global_transform = Transform3D(basis, Vector3(p.x, y + 0.06, p.y))
 
 	func step(delta: float) -> void:
 		if destroyed:

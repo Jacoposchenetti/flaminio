@@ -138,6 +138,7 @@ inquadrature), `--fight`, `--cops`, `--stairs=n`, `--shop=n`, `--inside=edificio
 ## Crediti
 
 - Mappa © OpenStreetMap contributors (ODbL).
+- Rilievo: TINITALY/1.1, Tarquini S. et al., INGV, https://doi.org/10.13127/tinitaly/1.1 (CC BY 4.0).
 - Personaggi e animazioni: Universal Base Characters e Universal Animation Library di Quaternius (CC0).
 - Auto e armi: Quaternius e altri autori CC0, scaricati da Poly Pizza.
 - Texture: ambientCG (CC0).
@@ -163,3 +164,24 @@ La copia di sviluppo (senza `manifest.json`) non si aggiorna mai da sola.
   cartella e il gioco con `-- --update-url=http://127.0.0.1:8000/` (`--autoupdate` aggiorna senza clic,
   `--menushot=file.png` salva la schermata del menu).
 - Lo zip completo (`tools/make_package.ps1`) porta la versione di `tools/versione.txt`.
+
+## Rilievo vero (salite e discese) — SPENTO, da rifare
+
+Per ora il quartiere è in piano: la prima versione (sotto) aveva aree intere sbagliate (dato a 10 m troppo
+grossolano, strade appoggiate sopra il terreno invece che dentro). Si accende solo con `convert_osm.py ... --rilievo`.
+Il codice che segue le quote (`surface_at`, `ground_basis`...) resta e con il rilievo a zero non cambia niente.
+
+Prima versione: `tools/fetch_dem.py` scarica il modello del terreno TINITALY dell'INGV (terreno nudo,
+celle di 10 m) e ne ritaglia Flaminio in `data/dem/`; `tools/convert_osm.py` lo porta sulla griglia del gioco
+(quota zero = il lungotevere) e lo sistema come una città vera:
+
+- sotto i grandi edifici toglie le "collinette" che il modello a volte vede (cupola del Palazzetto, stadi);
+- le strade sono in piano in larghezza, prendono la quota più bassa tra centro e bordi (ai piedi delle scarpate) e
+  hanno pendenze limitate al 14% (rete rilassata: ai piedi dei Parioli il modello fa rampe finte);
+- ogni palazzo poggia su un piano orizzontale alla quota della sua strada; piazze e campi sportivi in piano;
+- vicino al Tevere tutto resta a quota zero (muraglioni e banchine come prima); i laghetti stanno alla loro quota.
+
+Esce `data/heights.bin` (rilievo + Tevere) e `data/relief.bin` (solo rilievo). In gioco `surface_at()` è la quota
+su cui si cammina e si guida, `carve_at()` quanto scava il fiume, `ground_basis()` inclina auto e autobus.
+Il terreno colora da solo le scarpate: prato oltre il ~30%, muri di contenimento in tufo quasi in verticale.
+I locali si aprono solo dove la porta è a livello del marciapiede. Prova in salita: `--hilltest=x,z,gradi --drive=go`.
