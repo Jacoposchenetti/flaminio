@@ -154,7 +154,11 @@ ogni file) dal ramo `aggiornamenti` del repository GitHub, scarica dal tag `vN` 
 `aggiornamento` accanto al gioco, li controlla, poi si chiude e un piccolo `.bat` li mette al loro posto e riavvia.
 La copia di sviluppo (senza `manifest.json`) non si aggiorna mai da sola.
 
-- Pubblicare una versione nuova: `python tools/pubblica_aggiornamento.py` (versione +1 in `tools/versione.txt`).
+- **In automatico**: l'attività pianificata di Windows "Flaminio - pubblica aggiornamenti" lancia ogni 30 minuti
+  `pythonw tools/pubblica_aggiornamento.py --auto`, che pubblica da solo solo se il gioco è cambiato, se da 20 minuti
+  nessuno tocca i file (così non esce un lavoro a metà) e se il gioco parte senza errori negli script. Cosa fa (e
+  perché non pubblica) è in `tools/pubblica_auto.log`. Per spegnerla: `schtasks /Change /TN "Flaminio - pubblica aggiornamenti" /DISABLE`.
+- A mano, subito: `python tools/pubblica_aggiornamento.py` (versione +1 in `tools/versione.txt`).
 - Prova in locale: `python tools/pubblica_aggiornamento.py --locale CARTELLA`, poi `python -m http.server` in quella
   cartella e il gioco con `-- --update-url=http://127.0.0.1:8000/` (`--autoupdate` aggiorna senza clic,
   `--menushot=file.png` salva la schermata del menu).
