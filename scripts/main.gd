@@ -85,6 +85,8 @@ var missions: Missions
 var homes: Homes
 var _home_ui: HomeUI
 var _missions_done: Array = []
+var _known_bosses: Array = []  # nomi dei boss incontrati di persona: solo questi (e il tuo) stanno sulla mappa
+var _boss_scan := 0.0
 var bank_balance := 0  # conto corrente di chi gioca su questo PC (salvato nelle impostazioni)
 var _bank_ui: BankUI
 var _drill_bank := -1
@@ -514,6 +516,7 @@ func _load_settings() -> void:
 		fame = cfg.get_value("crime", "fame", 0)
 		bank_balance = cfg.get_value("bank", "balance", 0)
 		_missions_done = cfg.get_value("missions", "done", [])
+		_known_bosses = cfg.get_value("clans", "known_bosses", [])
 		police_on = cfg.get_value("game", "police", true)
 		_apply_quality()
 
@@ -531,6 +534,7 @@ func _save_settings() -> void:
 	cfg.set_value("crime", "fame", fame)
 	cfg.set_value("bank", "balance", bank_balance)
 	cfg.set_value("missions", "done", missions.done if missions else _missions_done)
+	cfg.set_value("clans", "known_bosses", _known_bosses)
 	cfg.save(SETTINGS_PATH)
 
 
@@ -731,6 +735,7 @@ func _start_playing() -> void:
 		hud.wanted_info = _my_wanted
 		hud.clock = daynight.clock_text
 		hud.fame_info = func() -> int: return fame
+		hud.clan_threats = func() -> Array: return clans.threats(my_name) if clans else []
 		_minimap.police_dots = _police_dots
 		_bigmap.police_dots = _police_dots
 		var amb := AudioStreamPlayer.new()
@@ -767,8 +772,7 @@ func _start_playing() -> void:
 			m.extra_pois.append_array(shops.map_pois())
 			for pad: Vector2 in Heli.PADS:
 				m.extra_pois.append([pad.x, pad.y, "Elicottero", "heli"])
-			for c: Dictionary in clans.clans:
-				m.extra_pois.append([float(c["hq"][0]), float(c["hq"][2]), "Boss · %s (%s)" % [c["boss"], c["name"]], "boss"])
+			m.dynamic_pois = _boss_pois
 			m.zones_fn = _zones_for_map
 			m.extra_pois.append_array(missions.map_pois())
 			m.extra_pois.append_array(homes.map_entries)
@@ -1386,6 +1390,14 @@ func _on_pause_action(id: String) -> void:
 		"creative":
 			if not _online_now():
 				_set_creative(not creative)
+		"calm_stars":
+			if creative:
+				police.clear(_my_peer())
+				_system("Creativa: stelle azzerate, la polizia ti lascia in pace.")
+		"calm_clans":
+			if creative and clans:
+				var n := clans.make_peace(my_name)
+				_system("Creativa: pace fatta con %d clan. Nessuno ti cerca più." % n if n > 0 else "Creativa: nessun clan ce l'aveva con te.")
 		"model":
 			_model_index = (_model_index + 1) % MODELS.size()
 			player.set_model(MODELS[_model_index])
@@ -1532,6 +1544,17 @@ func _physics_process(delta: float) -> void:
 func _process(delta: float) -> void:
 	_update_wheel()
 	_time += delta
+	_boss_scan -= delta
+	if _boss_scan <= 0.0 and player and clans:
+		# Un boss visto da vicino finisce sulla mappa.
+		_boss_scan = 1.0
+		var bn: Array = clans.boss_near(player.global_position, 35.0)
+		if not bn.is_empty():
+			var bname := String(clans.clan(int(bn[1])).get("boss", ""))
+			if bname != "" and not _known_bosses.has(bname):
+				_known_bosses.append(bname)
+				_system_clan("Ora sai dove trovare %s: è segnato sulla mappa." % bname)
+				_save_settings()
 	_frame += 1
 	if _respawn_timer >= 0.0:
 		_respawn_timer -= delta
@@ -1736,6 +1759,30 @@ func _process(delta: float) -> void:
 		_bank_test()
 	if player and _args.has("clantest"):
 		_clan_test()
+	if player and _args.has("threattest"):
+		# Prova: rabbia dei clan sulla HUD, boss scoperti sulla mappa, vita dell'elicottero che torna.
+		if _ct_step == 0 and _time > 3.0:
+			_ct_step = 1
+			clans.rage["0|%s" % my_name] = 170.0
+			clans.rage["1|%s" % my_name] = 20.0
+			var hq: Array = clans.clan(1)["hq"]
+			player.teleport(Vector3(float(hq[0]) + 6.0, float(hq[1]) + 1.0, float(hq[2]) + 6.0))
+			for n: Node in get_tree().get_nodes_in_group("damageable"):
+				if n is Heli:
+					(n as Heli).take_damage(500.0, 0, Vector3.ZERO)
+			print("minacce: ", clans.threats(my_name), " · boss in mappa: ", _boss_pois().size())
+		elif _ct_step == 1 and _time > 18.0:
+			_ct_step = 2
+			var hs := []
+			for n: Node in get_tree().get_nodes_in_group("damageable"):
+				if n is Heli:
+					hs.append(roundi((n as Heli).health))
+			print("minacce: ", clans.threats(my_name), " · boss in mappa: ", _boss_pois().size(), " · conosciuti ", _known_bosses, " · vita elicotteri ", hs)
+			if creative:
+				police.wanted[_my_peer()] = 3.0
+				_on_pause_action("calm_stars")
+				_on_pause_action("calm_clans")
+				print("dopo la pace: minacce ", clans.threats(my_name), " · stelle ", my_stars())
 	if player and _args.has("clantest2"):
 		_clan_test2()
 	if player and _args.has("press"):
@@ -2145,7 +2192,7 @@ func _set_creative(on: bool) -> void:
 				player.give_weapon(id, 999, false)
 		player.has_jetpack = true
 		player.armor = Player.MAX_ARMOR
-		_system("Modalità creativa: armi, munizioni, jetpack e soldi infiniti. K: fai arrivare un elicottero.")
+		_system("Modalità creativa: armi, munizioni, jetpack e soldi infiniti. K: fai arrivare un elicottero. Dal menu (Esc) azzeri le stelle e fai pace coi clan.")
 	elif was:
 		player.money = mini(player.money, 50000)
 		_system("Modalità creativa spenta.")
@@ -3210,6 +3257,12 @@ func _mission_test() -> void:
 	if _mt_step == 0 and _time > 2.0:
 		_mt_step = 1
 		missions.start(id)
+	elif _mt_step == 1 and _args.has("mlook") and _time > 3.0:
+		# --mlook: ci si ferma a guardare il bersaglio da 12 m (per controllare frecce e nomi).
+		_mt_step = 9
+		var tgt: Gunman = missions._data.get("target", missions._data.get("debtor"))
+		player.teleport(tgt.global_position + Vector3(12, 0.5, 0))
+		print("bersaglio: freccia ", tgt._arrow != null and tgt._arrow.visible, " · obiettivo «", missions._objective.text, "» · ", missions._where.text)
 	elif _mt_step == 1 and _time > 5.0:
 		_mt_step = 2
 		var who: Gunman = missions._data.get("target", missions._data.get("debtor"))
@@ -3590,6 +3643,22 @@ var _zone_polys := []
 
 
 ## Zone per la mappa: [poligono, colore del clan che la tiene, nome].
+## I boss sulla mappa: quello del tuo clan e quelli che hai già incontrato. Gli altri vanno cercati
+## nei loro territori (il pannello dei clan, U, dice in che zona si nascondono).
+func _boss_pois() -> Array:
+	var out := []
+	if clans == null:
+		return out
+	var mine := clans.clan_of(my_name)
+	for c: Dictionary in clans.clans:
+		if not c["npc"] and int(c["id"]) != mine:
+			continue
+		if int(c["id"]) != mine and not _known_bosses.has(String(c["boss"])):
+			continue
+		out.append([float(c["hq"][0]), float(c["hq"][2]), "Boss · %s (%s)" % [c["boss"], c["name"]], "boss"])
+	return out
+
+
 func _zones_for_map() -> Array:
 	if _zone_polys.is_empty():
 		for i in Crime.ZONES.size():

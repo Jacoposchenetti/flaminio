@@ -45,6 +45,7 @@ var player: Player
 var others: Callable  # func() -> Array di [Vector3 posizione, String nome]
 var police_dots: Callable  # func() -> Array di Vector3 (agenti e volanti)
 var zones_fn: Callable  # func() -> Array di [poligono, colore, nome] (territori dei clan)
+var dynamic_pois: Callable  # func() -> Array di luoghi che cambiano durante la partita
 var extra_pois: Array = []  # luoghi del gioco (armerie, negozi, edifici esplorabili): [x, z, nome, categoria]
 var waypoint: Variant = null  # Vector2 in metri, o null
 var dest_name := ""  # nome della destinazione
@@ -128,7 +129,7 @@ func _choose(s: Vector2, free_pin := true) -> void:
 
 ## Tutti i luoghi della mappa (OpenStreetMap e del gioco).
 func _all_pois() -> Array:
-	return city.data.get("pois", []) + extra_pois
+	return city.data.get("pois", []) + extra_pois + (dynamic_pois.call() as Array if dynamic_pois.is_valid() else [])
 
 
 ## Il luogo mostrato più vicino al punto s dello schermo (entro 16 pixel), o [].

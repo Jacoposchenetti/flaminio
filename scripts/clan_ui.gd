@@ -220,7 +220,9 @@ func _build_panel() -> void:
 				zs.append(Crime.ZONES[z]["name"])
 		var row := HBoxContainer.new()
 		var l := Label.new()
-		l.text = "%s · capo %s · %d affiliati · zone: %s" % [c["name"], c["boss"], (c["members"] as Dictionary).size(), ", ".join(zs) if not zs.is_empty() else "nessuna"]
+		var hz := Crime.zone_of(Vector2(float(c["hq"][0]), float(c["hq"][2])))
+		var hideout := (" · il capo si fa vedere a %s" % Crime.ZONES[hz]["name"]) if c["npc"] and hz >= 0 else ""
+		l.text = "%s · capo %s · %d affiliati · zone: %s%s" % [c["name"], c["boss"], (c["members"] as Dictionary).size(), ", ".join(zs) if not zs.is_empty() else "nessuna", hideout]
 		l.modulate = clans.color_of(int(c["id"])).lightened(0.3)
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL

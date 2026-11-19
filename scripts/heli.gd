@@ -1,6 +1,12 @@
 class_name Heli
 extends Car
 
+## Vita dell'elicottero: scende coi colpi ed esplode a zero; dopo qualche secondo senza danni si rigenera.
+const MAX_HEALTH := 900.0
+const REGEN_DELAY := 6.0
+const REGEN_RATE := 18.0  # punti al secondo
+var _since_hit := 99.0
+
 ## Elicottero pilotabile (modello costruito qui, a pezzi semplici). È un'auto per tutto il resto del gioco:
 ## ci si sale con F, in rete lo guida chi ci è salito e gli altri ne ricevono la posizione, si può distruggere.
 ##
@@ -39,7 +45,7 @@ func setup_heli(id: int, at: Vector3, yaw: float, police_style := false) -> Heli
 	model = "heli"
 	police_look = police_style
 	pad = at
-	health = 420.0
+	health = MAX_HEALTH
 	add_to_group("damageable")
 	name = "Elicottero_%d" % id
 	mass = 1800.0
@@ -239,6 +245,10 @@ func drive(throttle: float, steer: float, _handbrake: bool, _delta: float) -> vo
 
 func _physics_process(delta: float) -> void:
 	super._physics_process(delta)
+	# La carcassa si ripara da sola se per un po' nessuno la colpisce.
+	_since_hit += delta
+	if not destroyed and _since_hit > REGEN_DELAY and health < MAX_HEALTH:
+		health = minf(MAX_HEALTH, health + REGEN_RATE * delta)
 	if gone:
 		return
 	var engine_running := (driven_locally or driver_peer != 0) and not destroyed
@@ -333,6 +343,11 @@ func destroy(by_peer := 0) -> void:
 		_settle = 20.0  # cade e si ferma
 
 
+func take_damage(amount: float, from_peer: int, at: Vector3) -> void:
+	_since_hit = 0.0
+	super.take_damage(amount, from_peer, at)
+
+
 func _vanish() -> void:
 	pass  # gli elicotteri non spariscono: tornano sulla piazzola (_restore)
 
@@ -340,7 +355,7 @@ func _vanish() -> void:
 func _restore() -> void:
 	destroyed = false
 	gone = false
-	health = 420.0
+	health = MAX_HEALTH
 	_respawn_t = 0.0
 	driver_peer = 0
 	for mi: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):

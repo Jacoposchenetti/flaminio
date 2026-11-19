@@ -44,6 +44,8 @@ var _layer: CanvasLayer
 var _title: Label
 var _sub: Label
 var _objective: Label
+var _where: Label  # sotto l'obiettivo: dove si trova e quanto manca
+var _where_street := ""
 var _clock: Label
 var _banner_t := 0.0
 
@@ -75,6 +77,11 @@ func setup(m: Node, c: CityBuilder, cb: Combat) -> void:
 	_objective.offset_left = -420
 	_objective.offset_right = 420
 	_objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_where = _label(18, Color(1.0, 0.85, 0.3))
+	_where.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_where.offset_top = 124
+	_where.offset_left = -420
+	_where.offset_right = 420
 	_clock = _label(34, Color(1.0, 1.0, 1.0))
 	_clock.set_anchors_preset(Control.PRESET_CENTER_TOP)
 	_clock.offset_top = 48
@@ -212,6 +219,7 @@ func _banner(title: String, sub: String, t: float) -> void:
 func _objective_set(text: String, goal: Vector3 = Vector3.INF, label := "") -> void:
 	_objective.text = text
 	_goal = goal
+	_where_street = city.street_name(goal, 120.0) if goal != Vector3.INF and city else ""
 	if _marker:
 		_marker.queue_free()
 		_marker = null
@@ -442,9 +450,14 @@ func _process(delta: float) -> void:
 		_title.text = ""
 		_sub.text = ""
 	_clock.text = ("%d:%02d" % [int(timer) / 60, int(timer) % 60]) if timer >= 0.0 and active != "" else ""
+	_where.text = ""
 	if active == "":
 		return
 	var p: Player = main.player
+	if _goal != Vector3.INF and _objective.text != "":
+		var dist := Vector2(p.global_position.x - _goal.x, p.global_position.z - _goal.z).length()
+		var place := (" · %s" % _where_street) if _where_street != "" else ""
+		_where.text = "◆ Punto giallo sul radar, segui la linea blu%s · %s" % [place, Navigator.fmt_dist(dist)] if dist > 25.0 else "◆ Ci sei: i bersagli hanno una freccia rossa sopra la testa"
 	if p.dead:
 		fail("Sei morto.")
 		return

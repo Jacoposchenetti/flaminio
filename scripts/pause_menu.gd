@@ -32,6 +32,8 @@ var _box: VBoxContainer
 var _quality: Button
 var _police: Button
 var _creative: Button
+var _calm_stars: Button  # solo in creativa
+var _calm_clans: Button  # solo in creativa
 var _name: LineEdit
 var _controls: Label
 var _first: Button
@@ -82,6 +84,8 @@ func setup(player_name: String) -> void:
 	_quality = _button("Grafica", "quality")
 	_police = _button("Polizia", "police")
 	_creative = _button("Modalità creativa", "creative")
+	_calm_stars = _button("   ↳ Azzera le stelle", "calm_stars")
+	_calm_clans = _button("   ↳ Fai pace con i clan che ti cercano", "calm_clans")
 	_button("Cambia personaggio", "model")
 	var name_row := HBoxContainer.new()
 	_name = LineEdit.new()
@@ -136,6 +140,8 @@ func refresh(quality_high: bool, police_on: bool, can_police: bool, player_name:
 	_quality.text = "Grafica: " + ("alta" if quality_high else "bassa (più veloce)")
 	_creative.text = "Modalità creativa: " + ("attiva (tutto infinito)" if creative else "spenta") + (" · solo da soli" if online else "")
 	_creative.disabled = online
+	_calm_stars.visible = creative
+	_calm_clans.visible = creative
 	_police.text = "Polizia: " + ("attiva" if police_on else "disattivata")
 	_police.disabled = not can_police
 	if not _name.has_focus():

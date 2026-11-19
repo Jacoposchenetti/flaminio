@@ -167,7 +167,7 @@ pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
   delle zone, conquiste, guerre tra clan, blitz della DDA. `Clans.Soldier`: boss, guardie, squadre, rinforzi
   (in rete `NetSync.Kind.GANG`).
 - `scripts/clan_ui.gd`: pannello (U) e dialogo col boss (E). La fama la tiene ogni PC nelle impostazioni.
-- Prove: `--boss=n`, `--clantest`, `--clantest2`.
+- Prove: `--boss=n`, `--clantest`, `--clantest2`, `--threattest` (minacce dei clan, boss scoperti, vita dell'elicottero).
 
 ## Come è fatto
 

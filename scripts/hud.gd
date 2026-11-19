@@ -18,6 +18,7 @@ var _shops: Shops
 var wanted_info: Callable  # func() -> [stelle, secondi senza essere visto]
 var clock: Callable  # func() -> "hh:mm" (ora del gioco)
 var fame_info: Callable  # func() -> fama criminale
+var clan_threats: Callable  # func() -> Array di [testo, colore]: clan che ti cercano o ti tengono d'occhio
 
 
 func setup(p: Player, shops: Shops) -> void:
@@ -77,6 +78,23 @@ func _draw() -> void:
 	if fame_info.is_valid():
 		var f: int = fame_info.call()
 		_text(Vector2(w - 20, y0 + 214), "Fama %d · %s" % [f, Crime.level_name(f)], 17, Color(1.0, 0.75, 0.35), HORIZONTAL_ALIGNMENT_RIGHT)
+	if player.vehicle is Heli:
+		# Vita dell'elicottero (si rigenera se non ti colpiscono per qualche secondo).
+		var hv := player.vehicle as Heli
+		var frac := clampf(hv.health / Heli.MAX_HEALTH, 0.0, 1.0)
+		var hy := y0 + 240.0
+		_text(Vector2(x0, hy - 4), "Elicottero %d%%" % roundi(frac * 100.0), 16, Color(0.85, 0.9, 1.0))
+		draw_rect(Rect2(x0, hy + 4, 270, 9), Color(0, 0, 0, 0.55))
+		var hc := Color(0.35, 0.8, 1.0) if frac > 0.5 else (Color(1.0, 0.7, 0.2) if frac > 0.25 else Color(0.95, 0.2, 0.15))
+		if frac <= 0.25 and int(Time.get_ticks_msec() / 250) % 2 == 0:
+			hc = hc.lightened(0.4)
+		draw_rect(Rect2(x0, hy + 4, 270 * frac, 9), hc)
+	if clan_threats.is_valid():
+		# Clan che ce l'hanno con te: per quanto ancora e dove.
+		var ty := y0 + 275.0
+		for t: Array in clan_threats.call():
+			_text(Vector2(w - 20, ty), String(t[0]), 17, t[1] as Color, HORIZONTAL_ALIGNMENT_RIGHT)
+			ty += 22.0
 	# Mirino.
 	var c := size * 0.5
 	if player.aiming and player.weapon == "cecchino":

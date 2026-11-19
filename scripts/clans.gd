@@ -212,6 +212,52 @@ func hostile(id: int, player_name: String) -> bool:
 	return mine >= 0 and rel(id, mine) <= WAR
 
 
+## Creativa: i clan dimenticano quello che hai fatto, le squadre mandate a cercarti se ne vanno e le
+## guerre col tuo clan diventano tregue. Restituisce quanti clan ce l'avevano con te.
+func make_peace(player_name: String) -> int:
+	var n := 0
+	var mine := clan_of(player_name)
+	for c: Dictionary in clans:
+		var id := int(c["id"])
+		if id == mine:
+			continue
+		var key := "%d|%s" % [id, player_name]
+		var angry := float(rage.get(key, 0.0)) >= RAGE_WARN
+		rage.erase(key)
+		if mine >= 0 and rel(id, mine) <= WAR:
+			_set_rel(id, mine, -10)
+			angry = true
+		if angry:
+			n += 1
+	var p: Node = world.player
+	for s: Node in get_children():
+		if s is Soldier and (s as Soldier).role == "squad" and (s as Soldier).target == p:
+			s.queue_free()
+	_mark()
+	return n
+
+
+## Cosa pensano di te i clan: [testo, colore] per ognuno che ti cerca o ti tiene d'occhio.
+func threats(player_name: String) -> Array:
+	var out := []
+	var mine := clan_of(player_name)
+	for c: Dictionary in clans:
+		var id := int(c["id"])
+		if id == mine:
+			continue
+		var r := float(rage.get("%d|%s" % [id, player_name], 0.0))
+		var col := color_of(id).lightened(0.25)
+		if r >= RAGE_HUNT:
+			var mins := ceili((r - RAGE_HUNT) * 6.0 / 60.0)
+			var where := "ovunque" if r >= 150.0 else "nel suo territorio"
+			out.append(["☠ %s ti dà la caccia %s · ancora ~%d min" % [c["name"], where, maxi(mins, 1)], col])
+		elif mine >= 0 and rel(id, mine) <= WAR:
+			out.append(["⚔ %s è in guerra col tuo clan" % c["name"], col])
+		elif r >= RAGE_WARN:
+			out.append(["⚠ %s ti tiene d'occhio" % c["name"], col.darkened(0.1)])
+	return out
+
+
 func task_progress(id: int, player_name: String) -> int:
 	return int(tasks.get("%d|%s" % [id, player_name], 0))
 
@@ -844,7 +890,12 @@ func _zones_of(id: int) -> Array:
 
 
 func _physics_process(delta: float) -> void:
-	if world == null or not world.simulate:
+	if world != null and not world.simulate:
+		# Sui client la rabbia arriva solo quando cambia qualcosa: la si fa calare anche qui, come sull'host.
+		for k: String in rage.keys():
+			rage[k] = maxf(0.0, float(rage[k]) - delta / 6.0)
+		return
+	if world == null:
 		return
 	_t += delta
 	for d: Dictionary in [_squad_cd, _backup_cd, _corrupt_cd]:
@@ -881,7 +932,14 @@ func _tick_second() -> void:
 	var ps: Dictionary = world.players()
 	# La rabbia passa piano (un punto ogni 6 secondi).
 	for k: String in rage.keys():
-		rage[k] = float(rage[k]) - 1.0 / 6.0
+		var was := float(rage[k])
+		rage[k] = was - 1.0 / 6.0
+		if was >= RAGE_HUNT and float(rage[k]) < RAGE_HUNT:
+			var parts := k.split("|", true, 1)
+			var gone := clan(int(parts[0]))
+			if not gone.is_empty():
+				world.clan_msg(world.peer_of(parts[1]), "%s ha smesso di cercarti. Per ora." % gone["name"])
+			_mark()
 		if float(rage[k]) <= 0.0:
 			rage.erase(k)
 	var soldiers := get_children().filter(func(n: Node) -> bool: return n is Soldier)

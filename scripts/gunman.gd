@@ -19,6 +19,7 @@ var on_dead: Callable  # func(Gunman, from_peer)
 var on_hurt: Callable  # func(Gunman, from_peer)
 var flee_on_hit := false  # civili: scappano invece di combattere
 var label := ""  # nome sopra la testa (vicino)
+var _arrow: MeshInstance3D
 var dead := false
 var dead_time := 0.0
 var net_anim := "idle"
@@ -64,8 +65,24 @@ func _ready() -> void:
 		t.outline_size = 10
 		t.pixel_size = 0.006
 		t.modulate = Color(1.0, 0.85, 0.6)
-		t.visibility_range_end = 45.0
+		t.visibility_range_end = 90.0
+		t.no_depth_test = true
 		add_child(t)
+		# Freccia rossa sopra la testa, come i bersagli delle missioni in GTA: si vede anche da lontano.
+		_arrow = MeshInstance3D.new()
+		var cone := CylinderMesh.new()
+		cone.top_radius = 0.32
+		cone.bottom_radius = 0.0
+		cone.height = 0.6
+		var am := StandardMaterial3D.new()
+		am.albedo_color = Color(1.0, 0.15, 0.1)
+		am.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		am.no_depth_test = true
+		cone.material = am
+		_arrow.mesh = cone
+		_arrow.position.y = 2.9
+		_arrow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(_arrow)
 
 
 func is_mine() -> bool:
@@ -109,6 +126,10 @@ func _sees(n: Node3D) -> bool:
 
 
 func _physics_process(delta: float) -> void:
+	if _arrow:
+		_arrow.visible = not dead
+		_arrow.position.y = 2.9 + sin(Time.get_ticks_msec() * 0.005) * 0.15
+		_arrow.rotate_y(delta * 2.0)
 	if dead:
 		dead_time += delta
 		velocity = Vector3(0, velocity.y - 16.0 * delta, 0)
