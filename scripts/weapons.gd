@@ -18,6 +18,7 @@ const LIST := {
 	"granata": {"name": "Granate", "kind": "throw", "slot": 7, "damage": 140.0, "radius": 7.0, "rate": 1.0, "fuse": 3.0, "model": "grenade", "len": 0.12, "price": 300},
 	"mina": {"name": "Mine", "kind": "place", "slot": 7, "damage": 170.0, "radius": 6.0, "rate": 1.0, "trigger": 2.2, "model": "mine", "len": 0.35, "price": 500},
 	"auto": {"name": "Esplosione", "kind": "none", "slot": 0, "damage": 110.0, "radius": 7.0, "rate": 1.0, "price": -1},
+	"heli_mg": {"name": "Mitragliatrice dell'elicottero", "kind": "gun", "slot": 0, "damage": 22.0, "rate": 0.07, "spread": 0.018, "range": 320.0, "price": -1},
 	"tnt": {"name": "TNT", "kind": "place", "slot": 7, "damage": 250.0, "radius": 10.0, "rate": 1.0, "remote": true, "model": "bomb", "len": 0.35, "price": 700},
 }
 const ORDER := ["pugni", "coltello", "mazza", "pistola", "mitragliatrice", "fucile", "pompa", "cecchino", "bazooka", "granata", "mina", "tnt"]

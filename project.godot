@@ -23,3 +23,10 @@ common/physics_ticks_per_second=60
 
 anti_aliasing/quality/msaa_3d=2
 lights_and_shadows/directional_shadow/size=4096
+
+[shader_globals]
+
+night={
+"type": "float",
+"value": 0.0
+}

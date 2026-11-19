@@ -457,6 +457,14 @@ class Clerk:
 		robber = peer
 		shop["robbed_until"] = Time.get_ticks_msec() + 300000  # il locale si può rapinare di nuovo tra 5 minuti
 		mgr.world.crime("robbery", global_position, peer)
+		if String(shop.get("kind", "")).begins_with("bank"):
+			# In banca: l'impiegato alza le mani e passa il cassetto; il direttore apre il caveau. Scatta l'allarme.
+			state = "hands_up"
+			_t = 3.0
+			var banks: Node = mgr.world.get("banks")
+			if banks:
+				banks.on_rob(self, shop, peer)
+			return
 		if shop.get("kind", "") == "gun":
 			_fight(true)  # all'armeria il commesso è armato e reagisce
 			return
@@ -537,7 +545,9 @@ class Clerk:
 					face = atan2(tp.x, tp.z)
 				_t -= delta
 				if _t <= 0.0:
-					mgr.drop_cash(global_position + Vector3(0, 0.1, 0) + global_basis.z * 0.0, randi_range(300, 900))
+					var loot: Array = shop.get("loot", [300, 900])
+					if int(loot[1]) > 0:
+						mgr.drop_cash(global_position + Vector3(0, 0.1, 0), randi_range(int(loot[0]), int(loot[1])))
 					_flee(false)
 			"fight":
 				var p := _robber()
@@ -585,7 +595,7 @@ class Clerk:
 			_gun.global_transform = Transform3D(Basis(Vector3.UP, _human.rotation.y + rotation.y), _human.hand_position())
 
 
-## Fornitore dello spaccio: aspetta nel suo vialetto (fermo, ogni tanto parla al telefono). Si compra da lui con E.
+## Spacciatore della zona: aspetta nel suo vialetto (fermo, ogni tanto parla al telefono). Si compra da lui con E.
 ## Se sente spari scappa e poi torna; se viene ucciso lascia dei soldi e per 5 minuti non c'è nessuno.
 class Dealer:
 	extends Pedestrian

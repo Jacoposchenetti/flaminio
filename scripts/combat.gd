@@ -10,6 +10,7 @@ const RAY_MASK := 1 | 2 | 4 | 8 | 16 | 32  # mondo, alberi, giocatore locale, al
 
 signal noise(pos: Vector3, radius: float)  # rumore di spari ed esplosioni: i pedoni scappano
 signal crime(kind: String, pos: Vector3)  # reato del giocatore di questo PC: lo ascolta la polizia
+signal exploded(pos: Vector3, radius: float, peer: int)  # ogni esplosione, anche quelle arrivate da un altro PC
 
 var net_fx: Callable  # func(tipo: String, dati: Array) -> manda l'effetto agli altri
 var my_peer := 1
@@ -193,6 +194,7 @@ func explode(pos: Vector3, weapon_id: String, peer: int, replicate := true) -> v
 				var car := t as Car
 				car.blast(pos, radius)
 	explosion_fx(pos, radius)
+	exploded.emit(pos, radius, peer)
 	Sfx.play3d("explosion", pos, 8.0, 1.0, 1200.0)
 	noise.emit(pos, 80.0)
 	if replicate and net_fx.is_valid() and peer == my_peer:

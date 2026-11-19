@@ -119,6 +119,56 @@ auto guidate e distrutte, chat. Unica eccezione: le mine scattano sul PC di chi 
 ENet sulla porta UDP 7777, fino a 8 giocatori; non è protetto contro i trucchi. Se chi ospita ha un PC lento,
 pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
 
+## Novità: elicotteri, jetpack, slot machine, giorno e notte, creativa
+
+- `scripts/heli.gd` (`Heli`, sottoclasse di `Car`): elicotteri pilotabili sulle piazzole `Heli.PADS` (prati aperti,
+  alberi tolti; id in rete `Heli.BASE_ID + n`). Volo "arcade" a forze (velocità voluta nella direzione del muso),
+  rotore che prende giri, mitragliatrice (`heli_mg`) e razzi verso il centro della camera; distrutti tornano nuovi.
+- `Police.PoliceHeli`: a 5 stelle, gira sopra il ricercato con il faro, lo vede da 150 m, raffiche del mitragliere;
+  in rete è `NetSync.Kind.POLICE_HELI`.
+- Jetpack in `player.gd` (`has_jetpack`, `jet_fuel`, flag in `net_state`), in vendita in armeria.
+- `scripts/slot_machine.gd`: slot con rulli veri, premi, luci; i mobili li mette `Venues.build_room` nei bar
+  (`room["slots"]`).
+- `scripts/day_night.gd`: giornata di 45 minuti; sole/luna, cielo, foschia, global uniform `night` (finestre e
+  vetrine in `building.gdshader`), vetro dei lampioni e luci vere sui 22 lampioni più vicini, fari delle auto.
+  Ora condivisa da chi ospita (`net_clock`).
+- Modalità creativa (solo da soli): menu iniziale o pausa; tutto infinito, K chiama un elicottero.
+- Prove: `--hour=22`, `--heli=n`, `--press=azione@t0-t1,...`, `--helishot=t:file.png`, `--wanted=5`, `--god`,
+  `--slot=n --slotspin=t`, `--creative`, `--jettest`. Suoni nuovi da `tools/gen_sounds.py` (rotore, jetpack, slot).
+
+## Case
+
+- `scripts/homes.gd` (`Homes`): 16 case scelte nei palazzi veri (due per zona, portone sul lato verso la strada),
+  tipi e prezzi (`TYPES`, `ZONE_PRICE`), interni costruiti al volo DEPTH metri sotto il portone (solo sul PC di chi
+  entra), mobili procedurali (`FURNITURE`, `make_furniture`, livello di collisione `FURN_LAYER` per cliccarli),
+  cassaforte, armadio, letto, salvataggio in `user://case.json`.
+- `scripts/home_ui.gd`: portone (compra, visita, entra, vendi), cassaforte, arredamento con vista dall'alto.
+- Prova: `--hometest=attico --shotdir=CARTELLA`.
+
+## Banche, missioni, sicari
+
+- `scripts/banks.gd` (`Banks`): filiali nei punti OSM delle banche (insegne inventate, `Banks.BRANDS`); arredo in
+  `Banks.furnish` (chiamato da `Venues.build_room`, stanza 14 m); su chi ospita impiegati e direttore
+  (`Pedestrians.Clerk`), vigilanti (`Gunman`, in rete `Kind.GANG`), allarme, caveau (ostaggio, trapano, TNT via
+  `Combat.exploded`), sacchi, chiusura per indagini; stato a tutti con `net_bank`. Conto corrente: `BankUI`,
+  `main.bank_balance` nelle impostazioni.
+- `scripts/gunman.gd`: personaggio armato generico (vigilanti, nemici delle missioni).
+- `scripts/missions.gd`: contatti e missioni a fasi (locali al PC di chi le fa), banner, obiettivo, timer.
+- Sicari in `clans.gd` (`hitmen` di ogni clan, `hit_price`, `contracts`, `on_player_killed`) e nel pannello U.
+- Prove: `--banktest=n`, `--drilltest`, `--mission=festa|crediti`, `--hittest=Nome` (su chi ospita).
+
+## Malavita: spaccio, fama, clan
+
+- `scripts/crime.gd` (`Crime`): droghe (prezzi, domanda, rischio), livelli di fama, zone del quartiere (Voronoi
+  sui centri `ZONES`), clan iniziali (`NPC_CLANS`, nomi e boss inventati tranne la Banda della Magliana storica)
+  e rapporti tra loro.
+- `scripts/clans.gd` (`Clans`): stato dei clan su chi ospita (salvato in `user://clans.json`, copia agli altri con
+  `net_clan_state`), richieste dei giocatori (`request`), rabbia, squadre, rinforzi, spacciatori al soldo, entrate
+  delle zone, conquiste, guerre tra clan, blitz della DDA. `Clans.Soldier`: boss, guardie, squadre, rinforzi
+  (in rete `NetSync.Kind.GANG`).
+- `scripts/clan_ui.gd`: pannello (U) e dialogo col boss (E). La fama la tiene ogni PC nelle impostazioni.
+- Prove: `--boss=n`, `--clantest`, `--clantest2`.
+
 ## Come è fatto
 
 - `tools/fetch_osm.py` scarica i dati OpenStreetMap (Overpass, con più server di riserva); `tools/convert_osm.py`
@@ -141,6 +191,8 @@ inquadrature), `--fight`, `--cops`, `--stairs=n`, `--shop=n`, `--inside=edificio
 - Rilievo: LiDAR DTM 1 m Regione Lazio, Piano Straordinario di Telerilevamento, Ministero dell'Ambiente e della
   Sicurezza Energetica (open data); dove manca, TINITALY/1.1, Tarquini S. et al., INGV,
   https://doi.org/10.13127/tinitaly/1.1 (CC BY 4.0).
+- Coperture del suolo (prati e alberi che OSM non ha): ESA WorldCover 10 m 2021 v200, Zanaga D. et al.,
+  https://doi.org/10.5281/zenodo.7254221 (CC BY 4.0).
 - Personaggi e animazioni: Universal Base Characters e Universal Animation Library di Quaternius (CC0).
 - Auto e armi: Quaternius e altri autori CC0, scaricati da Poly Pizza.
 - Texture: ambientCG (CC0).
@@ -192,6 +244,15 @@ ogni ~4 m): strade, vialetti e cordoli non scendono mai sotto, nemmeno ai bordi.
 più superfici a parte: li disegna lo shader del terreno da `data/cover_png.bin` (PNG a 1 m per pixel), così
 seguono il rilievo senza buchi. Scarpate: prato oltre il ~30%, muri di contenimento in tufo quasi in verticale
 (nei parchi solo oltre ~60°). I locali si aprono solo dove la porta è a livello del marciapiede.
+
+Il terreno è disegnato a blocchi di 128 m: vicino (entro 380 m) un vertice ogni 2 m, la stessa maglia della
+collisione, così i piedi non affondano; lontano uno ogni 8 m.
+
+Prati e alberi che OpenStreetMap non ha (aiuole, cortili, scarpate, filari) vengono dalla carta satellitare
+**ESA WorldCover** a 10 m: `python tools/fetch_worldcover.py` ne legge dal file pubblico su AWS solo i riquadri di
+Flaminio (→ `data/dem/worldcover.npy`). `convert_osm.py` ne fa prato (strade con marciapiedi, piazze e palazzi
+restano liberi, i ritagli piccoli spariscono) e mette un albero per cella "alberi" dove non ce n'è già uno vicino;
+le aree di OSM vanno sopra, più precise. `--senza-worldcover` per spegnerla.
 
 Per tornare in piano: `convert_osm.py ... --piano`. Prova in salita: `--hilltest=x,z,gradi --drive=go`.
 Diagnostica: `RILIEVO_DEBUG=file.npz` salva terreno e profili stradali.

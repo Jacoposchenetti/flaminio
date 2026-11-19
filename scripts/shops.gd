@@ -12,14 +12,12 @@ const KINDS := {
 	"gun": {"title": "Armeria", "color": Color(0.85, 0.15, 0.1), "cat": "gun"},
 	"bar": {"title": "Bar", "color": Color(0.95, 0.6, 0.15), "cat": "bar"},
 	"pharmacy": {"title": "Farmacia", "color": Color(0.15, 0.75, 0.4), "cat": "pharmacy"},
-	"dealer": {"title": "Fornitore", "color": Color(0.6, 0.25, 0.9), "cat": "dealer"},
+	"bank": {"title": "Banca", "color": Color(1.0, 0.8, 0.25), "cat": "banca"},
+	"dealer": {"title": "Spacciatore", "color": Color(0.6, 0.25, 0.9), "cat": "dealer"},
 }
-## Spaccio: pacchetti comprati dal fornitore e rivenduti ai passanti (vedi main.gd, _try_sell).
-const STASH := [
-	{"name": "5 pacchetti", "n": 5, "price": 150},
-	{"name": "10 pacchetti", "n": 10, "price": 280},
-	{"name": "20 pacchetti", "n": 20, "price": 520},
-]
+## Spaccio: dosi comprate dallo spacciatore della zona e rivendute ai passanti (vedi main.gd, _try_sell).
+## Chi è del clan che tiene la zona paga il 20% in meno.
+var discount: Callable  # func(pos: Vector3) -> float (1.0 = prezzo pieno)
 const FOOD := [
 	{"id": "caffe", "name": "Caffè", "price": 2, "heal": 10},
 	{"id": "cornetto", "name": "Cornetto", "price": 3, "heal": 20},
@@ -103,14 +101,19 @@ func _place_dealers(city: CityBuilder) -> void:
 		if city.carve_at(mid.x, mid.y) < -0.3:
 			continue  # niente banchine del Tevere
 		cands.append(mid)
-	for target: float in [600.0, 1300.0]:
+	# Uno spacciatore per zona del quartiere, in un vialetto a metà strada tra il centro della zona e il bordo
+	# (lontano dai negozi), così ogni clan ha il suo uomo.
+	for zi in Crime.ZONES.size():
+		var zc: Vector2 = Crime.ZONES[zi]["c"]
 		var best := Vector2.INF
 		var best_d := INF
 		for c in cands:
-			var d := absf(c.distance_to(sp) - target)
+			if Crime.zone_of(c) != zi:
+				continue
+			var d := absf(c.distance_to(zc) - 120.0)
 			var far_from_shops := true
 			for s: Dictionary in shops:
-				if Vector2((s["pos"] as Vector3).x, (s["pos"] as Vector3).z).distance_to(c) < 150.0:
+				if Vector2((s["pos"] as Vector3).x, (s["pos"] as Vector3).z).distance_to(c) < 90.0:
 					far_from_shops = false
 					break
 			if far_from_shops and d < best_d:
@@ -118,7 +121,7 @@ func _place_dealers(city: CityBuilder) -> void:
 				best = c
 		if best != Vector2.INF:
 			var pos := Vector3(best.x, city.surface_at(best.x, best.y), best.y)
-			shops.append({"kind": "dealer", "pos": pos, "name": "Fornitore · " + city.street_name(pos, 80.0) if city.street_name(pos, 80.0) != "" else "Fornitore", "door": best})
+			shops.append({"kind": "dealer", "pos": pos, "name": "Spacciatore · " + String(Crime.ZONES[zi]["name"]), "door": best, "zone": zi})
 
 
 ## Il punto di marciapiede più vicino all'ingresso (i negozi in OSM stanno spesso dentro la sagoma del palazzo).
@@ -144,7 +147,7 @@ func _marker(s: Dictionary) -> void:
 	if s["kind"] == "dealer":
 		# Niente cerchio: c'è il fornitore in persona. Solo il nome sopra la sua posizione, da vicino.
 		var tag := Label3D.new()
-		tag.text = "Fornitore"
+		tag.text = "Spacciatore"
 		tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		tag.font_size = 36
 		tag.outline_size = 8
@@ -281,6 +284,8 @@ func items(shop: Dictionary) -> Array:
 					out.append(["   munizioni (%d)" % (mag * 2 if kind == "gun" else 3), int(w["ammo_price"]),
 						func() -> void: player.give_weapon(id, mag * 2 if kind == "gun" else 3)])
 			out.append(["Giubbotto antiproiettile", 600, func() -> void: player.armor = Player.MAX_ARMOR])
+			out.append(["Jetpack (Spazio tenuto in aria)" + (" · ce l'hai" if player.has_jetpack else ""), 0 if player.has_jetpack else 12000,
+				func() -> void: player.has_jetpack = true; player.jet_fuel = 1.0])
 		"bar":
 			for f: Dictionary in FOOD:
 				out.append([String(f["name"]), int(f["price"]), func() -> void: player.heal(float(f["heal"]))])
@@ -288,8 +293,17 @@ func items(shop: Dictionary) -> Array:
 			for f: Dictionary in PHARMA:
 				out.append([String(f["name"]), int(f["price"]), func() -> void: player.heal(float(f["heal"]))])
 		"dealer":
-			# Pacchetti da rivendere ai passanti (E vicino a qualcuno). Se ne portano al massimo Player.MAX_STASH.
-			for f: Dictionary in STASH:
-				out.append(["%s (ne hai %d, max %d)" % [f["name"], player.stash, Player.MAX_STASH], int(f["price"]),
-					func() -> void: player.stash = mini(Player.MAX_STASH, player.stash + int(f["n"]))])
+			# Dosi da rivendere ai passanti (E vicino a qualcuno). Se ne portano al massimo Crime.MAX_DOSES.
+			var k: float = discount.call(shop["pos"]) if discount.is_valid() else 1.0
+			for id: String in Crime.DRUG_ORDER:
+				var d: Dictionary = Crime.DRUGS[id]
+				for n: int in [5, 10]:
+					var price := int(round(int(d["buy"]) * n * k))
+					out.append(["%s · %d dosi (ne hai %d · strada € %d-%d)" % [d["name"], n, int(player.drugs.get(id, 0)), int(d["sell"][0]), int(d["sell"][1])], price,
+						func() -> void:
+							var got := clampi(Crime.MAX_DOSES - player.stash, 0, n)
+							player.drugs[id] = int(player.drugs.get(id, 0)) + got
+							player.money += price * (n - got) / n])  # oltre il massimo che si porta: resto indietro
+			if k < 1.0:
+				out.append(["   (sconto del 20%: sei del clan che tiene la zona)", 0, func() -> void: pass])
 	return out

@@ -14,6 +14,7 @@ uniform sampler2D roof_normal : hint_normal, filter_linear_mipmap_anisotropic, r
 uniform bool modern = false; // calcestruzzo liscio con nastri vetrati (MAXXI)
 uniform float floor_h = 3.2;
 uniform float bay_w = 3.4;
+global uniform float night; // 0 di giorno, 1 di notte (DayNight): finestre e vetrine accese
 
 varying vec3 tint;
 varying vec3 wpos;
@@ -42,6 +43,7 @@ void fragment() {
 	vec2 suv = UV / 3.0; // l'intonaco si ripete ogni 3 m
 	vec3 col;
 	vec3 nmap = texture(plaster_normal, suv).rgb;
+	vec3 emit = vec3(0.0);
 	float rough = texture(plaster_rough, suv).r;
 	float metal = 0.0;
 	float spec = 0.5;
@@ -95,6 +97,7 @@ void fragment() {
 				float shop = hash(vec2(bay, floor(u / 40.0) + 7.0));
 				if (shop < 0.5) {
 					col = vec3(0.05, 0.06, 0.07) + 0.05 * hash(vec2(bay, 3.0)); // vetrina
+					if (v > 0.4 && v < 2.8 && hash(vec2(bay, 21.0)) < 0.55) emit = vec3(1.0, 0.82, 0.55) * 1.6 * night; // accesa la sera
 					rough = 0.05;
 					spec = 0.9;
 					if (v > 2.9) col = srgb(vec3(0.6, 0.15 + 0.5 * hash(vec2(bay, 9.0)), 0.12)); // insegna
@@ -126,6 +129,9 @@ void fragment() {
 					// Vetro con riflessi; tenda chiara in alto in alcune finestre.
 					col = vec3(0.02, 0.025, 0.03);
 					if (r > 0.75 && c.y > -0.05) col = srgb(vec3(0.75, 0.72, 0.62)) * 0.35;
+					// Di notte una parte delle finestre è illuminata (luce calda, qualcuna più fredda: la TV).
+					float lit = hash(vec2(bay * 1.7 + 3.0, lv * 5.3 + floor(u / 50.0)));
+					if (lit < 0.32) emit = (lit < 0.05 ? vec3(0.55, 0.65, 1.0) : vec3(1.0, 0.78, 0.5)) * (0.9 + lit * 2.0) * night;
 					rough = 0.04;
 					spec = 1.0;
 					metal = 0.15;
@@ -145,6 +151,7 @@ void fragment() {
 		}
 	}
 	ALBEDO = col;
+	EMISSION = emit;
 	NORMAL_MAP = nmap;
 	NORMAL_MAP_DEPTH = 1.0;
 	ROUGHNESS = rough;

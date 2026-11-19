@@ -10,6 +10,7 @@ var _model: OptionButton
 var _address: LineEdit
 var _status: Label
 var police_check: CheckBox
+var creative_check: CheckBox
 
 
 func setup(models: Array, player_name: String, model_index: int, address: String) -> void:
@@ -58,6 +59,9 @@ func setup(models: Array, player_name: String, model_index: int, address: String
 	police_check.text = "Polizia attiva (in gioco: F3; in rete decide chi ospita)"
 	police_check.button_pressed = true
 	box.add_child(police_check)
+	creative_check = CheckBox.new()
+	creative_check.text = "Modalità creativa: armi, gadget, munizioni e soldi infiniti (solo da soli)"
+	box.add_child(creative_check)
 
 	var solo := Button.new()
 	solo.text = "Gioca da solo"

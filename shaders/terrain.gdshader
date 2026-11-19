@@ -6,6 +6,7 @@ uniform sampler2D heights : filter_linear, repeat_disable;
 uniform sampler2D relief_map : filter_linear, repeat_disable; // quota senza il Tevere: la differenza è lo scavo del fiume
 uniform vec2 origin; // angolo nord-ovest in metri (x, z)
 uniform vec2 extent; // dimensione coperta dalla texture in metri
+uniform float lower = 0.0; // la maglia lontana sta un filo sotto quella vicina (niente fessure tra i blocchi)
 uniform sampler2D ground_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D ground_normal : hint_normal, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D grass_albedo : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -54,6 +55,7 @@ void vertex() {
 		BINORMAL = normalize(vec3(0.0, (hs - hn) / (2.0 * st.y), 1.0));
 		slope = 1.0 - NORMAL.y;
 	}
+	VERTEX.y -= lower;
 	wpos = w.xz;
 }
 

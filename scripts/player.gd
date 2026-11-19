@@ -46,7 +46,7 @@ var cam_pitch := -0.25
 var water_check: Callable  # func(x, z) -> bool: c'è il fiume qui sotto?
 var water_y := -10.5  # pelo dell'acqua del Tevere
 var car_lookup: Callable  # func(id) -> Car (per i giocatori remoti al volante)
-var hurt_remote: Callable  # func(peer, quantità): danno a un giocatore di un altro PC
+var hurt_remote: Callable  # func(peer, quantità, chi colpisce): danno a un giocatore di un altro PC
 var combat: Combat
 var camera: Camera3D
 var vehicle: Car  # auto guidata da questo giocatore (solo locale)
@@ -64,8 +64,31 @@ var clip := {}  # colpi nel caricatore
 var last_hit_by := 0
 var hurt_flash := 0.0
 var penalty_paid := false  # la perdita di soldi per questa morte è già stata pagata
-var stash := 0  # pacchetti da spacciare
-const MAX_STASH := 30
+var drugs := {}  # droga -> dosi da spacciare (vedi Crime.DRUGS)
+const MAX_STASH := Crime.MAX_DOSES
+## Dosi in tutto (le vecchie prove scrivono stash = n: diventano dosi d'erba).
+var stash: int:
+	get:
+		var n := 0
+		for k: String in drugs:
+			n += int(drugs[k])
+		return n
+	set(v):
+		drugs = {"erba": v} if v > 0 else {}
+# Jetpack (si compra in armeria): tenendo premuto Spazio in aria si vola; il carburante si ricarica a terra.
+const JET_TIME := 14.0  # secondi di volo con il serbatoio pieno
+const JET_REFILL := 6.0  # secondi per riempirlo da vuoto, stando a terra
+var has_jetpack := false
+var jet_worn := true  # indossato (J lo toglie e lo rimette; tolto non si vede e non vola)
+var jet_fuel := 1.0
+var jet_on := false
+var creative := false  # modalità creativa (solo da soli): tutto infinito
+var _jet_node: Node3D
+var _jet_flames: Array[MeshInstance3D] = []
+var _jet_light: OmniLight3D
+var _jet_sound: AudioStreamPlayer3D
+var _jet_air := 0.0  # da quanto si è in aria con Spazio premuto
+var _net_flags := 0
 
 var _model: Node3D
 var _human: Human
@@ -157,6 +180,9 @@ func _load_model() -> void:
 	_model = _human
 	add_child(_model)
 	_weapon_shown = ""
+	_jet_node = null  # lo zaino stava sul modello vecchio
+	_jet_flames.clear()
+	_jet_light = null
 
 
 func set_model(name_: String) -> void:
@@ -177,14 +203,16 @@ func set_display_name(n: String) -> void:
 func net_state() -> Array:
 	# Auto: il suo id; -1 a piedi; -2 - colore se in monopattino.
 	var on := vehicle.car_id if vehicle else (-2 - _ride_color() if scooter >= 0 else -1)
-	return [global_position, _model.rotation.y if _model else 0.0, _current, on, weapon]
+	var flags := (1 if has_jetpack and jet_worn else 0) | (2 if jet_on else 0)
+	return [global_position, _model.rotation.y if _model else 0.0, _current, on, weapon, flags]
 
 
 func _ride_color() -> int:
 	return int(_ride_mesh.get_meta("color", 0)) if _ride_mesh else 0
 
 
-func apply_state(pos: Vector3, rot: float, anim: String, car := -1, weapon_id := "pugni") -> void:
+func apply_state(pos: Vector3, rot: float, anim: String, car := -1, weapon_id := "pugni", flags := 0) -> void:
+	_net_flags = flags
 	_net_pos = pos
 	_net_rot = rot
 	_net_anim = anim
@@ -205,7 +233,7 @@ func is_mine() -> bool:
 func take_damage(amount: float, from_peer: int, _at: Vector3) -> void:
 	if not is_local:
 		if hurt_remote.is_valid():
-			hurt_remote.call(peer_id, amount)
+			hurt_remote.call(peer_id, amount, from_peer)
 		return
 	if dead or amount <= 0.0:
 		return
@@ -302,6 +330,8 @@ func next_weapon(step := 1) -> void:
 
 func rounds_text() -> String:
 	var w := Weapons.info(weapon)
+	if creative and String(w["kind"]) != "melee":
+		return "∞"
 	match String(w["kind"]):
 		"melee":
 			return ""
@@ -439,6 +469,7 @@ func _update_weapon_model() -> void:
 
 
 func enter_car(car: Car) -> void:
+	_set_jet(false)
 	vehicle = car
 	velocity = Vector3.ZERO
 	aiming = false
@@ -562,6 +593,108 @@ func _seat_transform(car: Car) -> Transform3D:
 	return car.global_transform * car.seat
 
 
+# --- Jetpack ------------------------------------------------------------------------------------
+
+
+## In aria, tenendo premuto Spazio (A / Croce), il jetpack spinge in su; Ctrl scende piano. Il serbatoio dura
+## JET_TIME secondi e a terra si riempie di nuovo. In modalità creativa non finisce mai.
+func _jetpack(delta: float, blocked: bool) -> void:
+	var holding := not blocked and Input.is_action_pressed("jump")
+	if is_on_floor():
+		_jet_air = 0.0
+		jet_fuel = minf(1.0, jet_fuel + delta / JET_REFILL)
+	elif holding:
+		_jet_air += delta
+	else:
+		_jet_air = 0.0
+	var want := has_jetpack and jet_worn and not swimming and holding and _jet_air > 0.2 and (jet_fuel > 0.0 or creative)
+	if want:
+		var down := not blocked and Input.is_action_pressed("crouch")
+		velocity.y = move_toward(velocity.y, -3.0 if down else 6.5, (GRAVITY + 26.0) * delta)
+		if not creative:
+			jet_fuel = maxf(0.0, jet_fuel - delta / JET_TIME)
+	_set_jet(want)
+	_show_jetpack(has_jetpack and jet_worn, want)
+
+
+func _set_jet(on: bool) -> void:
+	jet_on = on
+	if on and _jet_sound == null:
+		_jet_sound = Sfx.loop3d(self, "jet", 0.0, 140.0)
+	elif not on and _jet_sound:
+		_jet_sound.queue_free()
+		_jet_sound = null
+
+
+## Zaino con due serbatoi sulla schiena; fiamme e luce arancione quando spinge.
+func _show_jetpack(owned: bool, burning: bool) -> void:
+	if owned and _jet_node == null and _model:
+		_jet_node = Node3D.new()
+		var metal := StandardMaterial3D.new()
+		metal.albedo_color = Color(0.55, 0.57, 0.6)
+		metal.metallic = 0.8
+		metal.roughness = 0.3
+		var red := StandardMaterial3D.new()
+		red.albedo_color = Color(0.7, 0.1, 0.06)
+		red.metallic = 0.4
+		var fire := StandardMaterial3D.new()
+		fire.albedo_color = Color(1.0, 0.6, 0.15, 0.85)
+		fire.emission_enabled = true
+		fire.emission = Color(1.0, 0.5, 0.1)
+		fire.emission_energy_multiplier = 6.0
+		fire.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		fire.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		var back := BoxMesh.new()
+		back.size = Vector3(0.36, 0.42, 0.12)
+		back.material = red
+		var mb := MeshInstance3D.new()
+		mb.mesh = back
+		mb.position = Vector3(0, 1.28, -0.2)
+		_jet_node.add_child(mb)
+		_jet_flames.clear()
+		for side: float in [1.0, -1.0]:
+			var tank := CapsuleMesh.new()
+			tank.radius = 0.09
+			tank.height = 0.55
+			tank.material = metal
+			var mt := MeshInstance3D.new()
+			mt.mesh = tank
+			mt.position = Vector3(0.12 * side, 1.25, -0.3)
+			_jet_node.add_child(mt)
+			var flame := CylinderMesh.new()
+			flame.top_radius = 0.07
+			flame.bottom_radius = 0.0
+			flame.height = 0.6
+			flame.material = fire
+			var mf := MeshInstance3D.new()
+			mf.mesh = flame
+			mf.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			mf.position = Vector3(0.12 * side, 0.68, -0.3)
+			mf.visible = false
+			_jet_node.add_child(mf)
+			_jet_flames.append(mf)
+		_jet_light = OmniLight3D.new()
+		_jet_light.light_color = Color(1.0, 0.55, 0.2)
+		_jet_light.omni_range = 5.0
+		_jet_light.position = Vector3(0, 0.6, -0.3)
+		_jet_light.visible = false
+		_jet_node.add_child(_jet_light)
+		_model.add_child(_jet_node)
+	elif not owned and _jet_node:
+		_jet_node.queue_free()
+		_jet_node = null
+		_jet_flames.clear()
+		_jet_light = null
+	if _jet_node:
+		_jet_node.visible = not mounted()
+		for f in _jet_flames:
+			f.visible = burning
+			f.scale = Vector3.ONE * randf_range(0.8, 1.2)
+		if _jet_light:
+			_jet_light.visible = burning
+			_jet_light.light_energy = randf_range(2.0, 3.0)
+
+
 # --- Ciclo --------------------------------------------------------------------------------------
 
 
@@ -605,12 +738,16 @@ func _physics_process(delta: float) -> void:
 			+ Input.get_action_strength("accelerate") - Input.get_action_strength("brake"), -1.0, 1.0)
 		var steer := 0.0 if blocked else Input.get_axis("move_right", "move_left")
 		vehicle.drive(throttle, steer, not blocked and Input.is_action_pressed("jump"), delta)
+		_show_jetpack(has_jetpack and jet_worn, false)
 		global_transform = _seat_transform(vehicle)
 		_model.rotation.y = 0.0
 		swimming = false
 		_play("drive")
 		_update_weapon_model()
-		_mounted_fire(blocked)
+		if vehicle is Heli:
+			(vehicle as Heli).fire(self, blocked)
+		else:
+			_mounted_fire(blocked)
 		return
 	if scooter >= 0:
 		_ride(delta, blocked)
@@ -646,7 +783,9 @@ func _physics_process(delta: float) -> void:
 	if _roll > 0.0:
 		_roll -= delta
 		target = _roll_dir * 7.0
-	var accel := 10.0 if is_on_floor() or swimming else 3.0
+	var accel := 10.0 if is_on_floor() or swimming else (6.0 if jet_on else 3.0)
+	if jet_on:
+		target = dir * (17.0 if sprint else 10.0)  # in volo col jetpack ci si sposta più veloci
 	velocity.x = lerpf(velocity.x, target.x, 1.0 - exp(-accel * delta))
 	velocity.z = lerpf(velocity.z, target.z, 1.0 - exp(-accel * delta))
 
@@ -660,6 +799,7 @@ func _physics_process(delta: float) -> void:
 		if is_on_floor() and jump:
 			velocity.y = JUMP
 			crouching = false
+		_jetpack(delta, blocked)
 	var was_air := not is_on_floor()
 	var vy := velocity.y
 	move_and_slide()
@@ -704,6 +844,9 @@ func _puppet_update(delta: float) -> void:
 		_ride_mesh.rotation.y = _model.rotation.y
 	elif _ride_mesh:
 		_set_ride_mesh(false)
+	_show_jetpack(_net_flags & 1 == 1, _net_flags & 2 == 2)
+	if (_net_flags & 2 == 2) != jet_on:
+		_set_jet(_net_flags & 2 == 2)
 	var k := 1.0 - exp(-12.0 * delta)
 	if global_position.distance_to(_net_pos) > 20.0:
 		global_position = _net_pos
@@ -731,6 +874,9 @@ func _process(delta: float) -> void:
 	if vehicle:
 		head = vehicle.global_position + Vector3(0, 1.9, 0)
 		target_len = 7.5
+		if vehicle is Heli:
+			head = vehicle.global_position + Vector3(0, 2.6, 0)
+			target_len = 15.0
 		if Time.get_ticks_msec() / 1000.0 - _last_mouse > 1.2 and vehicle.linear_velocity.length() > 2.0:
 			cam_yaw = lerp_angle(cam_yaw, vehicle.global_rotation.y + PI, 1.0 - exp(-2.5 * delta))
 			cam_pitch = lerpf(cam_pitch, -0.22, 1.0 - exp(-2.0 * delta))

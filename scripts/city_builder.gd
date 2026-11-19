@@ -13,7 +13,9 @@ const Y_ROAD := 0.06
 const Y_TRAM := 0.075
 const FLOOR_H := 3.2
 const BAY_W := 3.4
-const NEAR_RANGE := 260.0  # oltre questa distanza alberi, balconi e lampioni passano alla versione semplice
+const NEAR_RANGE := 260.0
+const TERRAIN_CHUNK := 64  # celle per blocco di terreno (128 m)
+const TERRAIN_NEAR := 380.0  # oltre questa distanza i blocchi di terreno passano alla maglia leggera  # oltre questa distanza alberi, balconi e lampioni passano alla versione semplice
 const AREA_COLORS := {
 	"green": Color(0.42, 0.55, 0.28),
 	"wood": Color(0.33, 0.45, 0.22),
@@ -36,6 +38,8 @@ var _stone_mat: StandardMaterial3D
 var water_y := -10.5  # pelo dell'acqua del Tevere (da city.json)
 var _bridge_polys: Array[PackedVector2Array] = []
 var venues: Array = []  # locali (bar, farmacie, armerie) con l'interno: vedi venues.gd
+var lamp_points := PackedVector3Array()  # dove sta la lampada di ogni lampione (per le luci di notte)
+var lamp_glass: StandardMaterial3D  # vetro dei lampioni: si accende di notte
 var venue_rooms: Array = []  # per ogni locale: posizioni di bancone, commesso, ingresso
 var enterables: Array = []  # [x, z, nome, "enter"] davanti alla porta dei palazzi esplorabili
 var _interior_picks: Array = []
@@ -202,13 +206,13 @@ func ground_basis(x: float, z: float, yaw: float, half_len := 2.0, half_w := 0.9
 	return Basis(up.cross(fwd), up, fwd).orthonormalized()
 
 
-## Quota della maglia del terreno com'è disegnata (vertici ogni ~4 m, vedi _build_terrain): dove la strada passa
-## tra due vertici più alti, il triangolo del terreno sta sopra la quota vera. Strade e cordoli non scendono sotto.
+## Quota della maglia del terreno com'è disegnata da vicino (un vertice per cella, vedi _build_terrain): dentro
+## una cella il triangolo può stare un filo sopra l'interpolazione bilineare. Strade e cordoli non scendono sotto.
 func mesh_top_at(x: float, z: float) -> float:
-	var nx := hmap_w / 2 + 1
-	var nz := hmap_h / 2 + 1
-	var sx := (hmap_w - 1) * cell / nx
-	var sz := (hmap_h - 1) * cell / nz
+	var nx := hmap_w - 1
+	var nz := hmap_h - 1
+	var sx := cell
+	var sz := cell
 	var fx := clampf((x - origin.x) / sx, 0.0, nx - 0.001)
 	var fz := clampf((z - origin.y) / sz, 0.0, nz - 0.001)
 	var ix := int(fx)
@@ -363,14 +367,52 @@ func _build_terrain() -> void:
 		mat.set_shader_parameter("has_cover", true)
 	var size := Vector2(hmap_w - 1, hmap_h - 1) * cell
 	var center := origin + size * 0.5
-	var plane := PlaneMesh.new()
-	plane.size = size
-	plane.subdivide_width = hmap_w / 2
-	plane.subdivide_depth = hmap_h / 2
-	plane.material = mat
-	var mi := _add_mesh(plane, "Terreno", false)
-	mi.position = Vector3(center.x, 0, center.y)
-	mi.extra_cull_margin = 64.0  # il terreno sale fino a +45 m (colline) e scende a -14 (Tevere)
+	# Terreno a blocchi da TERRAIN_CHUNK celle: vicino un vertice per cella (la stessa maglia della collisione,
+	# così i piedi non affondano e i bordi delle strade restano netti), lontano uno ogni 4 celle. La versione
+	# lontana deborda di 8 m e sta 15 cm più in basso: copre le fessure tra blocchi vicini e lontani.
+	var coarse_mat: ShaderMaterial = mat.duplicate()
+	coarse_mat.set_shader_parameter("lower", 0.15)
+	var holder := Node3D.new()
+	holder.name = "Terreno"
+	add_child(holder)
+	var meshes := {}
+	var near := TERRAIN_NEAR
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--terrain_near="):  # prova: distanza della maglia fine
+			near = float(arg.split("=")[1])
+	var cells_x := hmap_w - 1
+	var cells_z := hmap_h - 1
+	for cz in range(0, cells_z, TERRAIN_CHUNK):
+		for cx in range(0, cells_x, TERRAIN_CHUNK):
+			var nx := mini(TERRAIN_CHUNK, cells_x - cx)
+			var nz := mini(TERRAIN_CHUNK, cells_z - cz)
+			for lod in 2:
+				var key := Vector3i(nx, nz, lod)
+				if not meshes.has(key):
+					var pm := PlaneMesh.new()
+					if lod == 0:
+						pm.size = Vector2(nx, nz) * cell
+						pm.subdivide_width = nx - 1
+						pm.subdivide_depth = nz - 1
+						pm.material = mat
+					else:
+						pm.size = Vector2(nx, nz) * cell + Vector2(16, 16)
+						pm.subdivide_width = maxi(0, ceili(pm.size.x / (cell * 4.0)) - 1)
+						pm.subdivide_depth = maxi(0, ceili(pm.size.y / (cell * 4.0)) - 1)
+						pm.material = coarse_mat
+					meshes[key] = pm
+				var mi := MeshInstance3D.new()
+				mi.mesh = meshes[key]
+				mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				mi.position = Vector3(origin.x + (cx + nx * 0.5) * cell, 0, origin.y + (cz + nz * 0.5) * cell)
+				mi.extra_cull_margin = 64.0  # il terreno sale fino a +45 m (colline) e scende a -14 (Tevere)
+				if lod == 0:
+					mi.visibility_range_end = near
+					mi.visibility_range_end_margin = 10.0
+				else:
+					mi.visibility_range_begin = near
+					mi.visibility_range_begin_margin = 10.0
+				holder.add_child(mi)
 
 	# Cornice di terreno attorno alla mappa, per non vedere il vuoto all'orizzonte.
 	var omat := StandardMaterial3D.new()
@@ -697,6 +739,7 @@ func _build_roads() -> void:
 								var xf := Transform3D(basis.orthonormalized(), Vector3(pos2.x, surface_at(pos2.x, pos2.y), pos2.y))
 								_push(lamps, xf)
 								_push(lamps_far, xf)
+								lamp_points.append(xf * Vector3(1.7, 7.9, 0.0))
 								lamp_side = -lamp_side
 							lamp_next += 30.0
 			prev_l = l
@@ -817,6 +860,7 @@ func _lamp_mesh(detailed: bool) -> ArrayMesh:
 		glass.emission_enabled = true
 		glass.emission = Color(1.0, 0.85, 0.6)
 		glass.emission_energy_multiplier = 0.2
+		lamp_glass = glass  # di notte lo accende DayNight
 		var bulb := CylinderMesh.new()
 		bulb.top_radius = 0.34
 		bulb.bottom_radius = 0.3
@@ -1190,6 +1234,12 @@ func _build_trees() -> void:
 	for t: Array in data["trees"]:
 		var x: float = t[0]
 		var zz: float = t[1]
+		var on_pad := false
+		for pad: Vector2 in Heli.PADS:
+			if pad.distance_to(Vector2(x, zz)) < 13.0:
+				on_pad = true  # piazzola degli elicotteri libera dagli alberi
+		if on_pad:
+			continue
 		var g := height_at(x, zz)
 		if g < water_y + 0.5 or g < -0.3 and g > -9.0:
 			continue  # niente alberi in acqua o sul muraglione

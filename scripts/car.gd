@@ -34,6 +34,8 @@ var destroyed := false
 var combat: Combat
 var on_destroyed: Callable  # func(id): per avvisare gli altri PC
 var moved := false  # spostata rispetto al parcheggio iniziale (da comunicare a chi entra dopo)
+var _lamp_at := Vector3(0.6, 0.7, 2.0)  # faro destro, in coordinate dell'auto (il sinistro è speculare)
+var _beams: Array[SpotLight3D] = []
 
 
 func setup(id: int, model_name: String, paint: Color) -> Car:
@@ -144,7 +146,28 @@ func setup(id: int, model_name: String, paint: Color) -> Car:
 
 	# Seduto: la testa resta circa 20 cm sotto il tetto (la persona seduta è alta ~1,3 m dal punto d'appoggio).
 	seat = Transform3D(Basis(), Vector3(0.36, body_aabb.end.y - 1.5, body_aabb.get_center().z - 0.15))
+	_lamp_at = Vector3(body_aabb.size.x * 0.33, body_aabb.position.y + body_aabb.size.y * 0.4, body_aabb.end.z - 0.1)
 	return self
+
+
+## Fari: accesi di notte quando qualcuno guida (solo le auto guidate, per non avere centinaia di luci).
+func _update_beams() -> void:
+	var on := not destroyed and (driven_locally or driver_peer != 0) and DayNight.current != null and DayNight.current.is_night()
+	if on and _beams.is_empty():
+		for side: float in [1.0, -1.0]:
+			var l := SpotLight3D.new()
+			l.light_color = Color(1.0, 0.95, 0.85)
+			l.light_energy = 6.0
+			l.spot_range = 38.0
+			l.spot_angle = 28.0
+			l.spot_attenuation = 0.8
+			l.shadow_enabled = side > 0.0
+			l.position = Vector3(_lamp_at.x * side, _lamp_at.y, _lamp_at.z)
+			l.rotation = Vector3(-0.08, PI, 0.0)  # le spot guardano verso -Z: le giro in avanti, un po' in basso
+			add_child(l)
+			_beams.append(l)
+	for l in _beams:
+		l.visible = on
 
 
 ## Il giocatore locale prende o lascia il volante.
@@ -262,6 +285,8 @@ func _physics_process(delta: float) -> void:
 	_cleanup(delta)
 	if gone:
 		return
+	if driven_locally or driver_peer != 0 or not _beams.is_empty():
+		_update_beams()
 	if _engine:
 		_engine.pitch_scale = 0.55 + clampf(linear_velocity.length() / 22.0, 0.0, 1.6)
 	if driven_locally:

@@ -9,16 +9,21 @@ extends RefCounted
 
 const KIND_OF := {
 	"cafe": "bar", "bar": "bar", "pub": "bar", "pharmacy": "pharmacy", "chemist": "pharmacy",
-	"supermarket": "gun", "convenience": "gun",
+	"supermarket": "gun", "convenience": "gun", "bank": "bank",
 }
-const SPACING := {"bar": 220.0, "pharmacy": 250.0, "gun": 290.0}
+const SPACING := {"bar": 220.0, "pharmacy": 250.0, "gun": 290.0, "bank": 420.0}
 const ROOM_W := 8.0
 const ROOM_H := 3.4
 const WALL := 0.3
 const DOOR_W := 1.8
 const DOOR_H := 2.6
-const TITLES := {"bar": "Bar", "pharmacy": "Farmacia", "gun": "Armeria"}
-const SIGN := {"bar": Color(1.0, 0.65, 0.2), "pharmacy": Color(0.2, 1.0, 0.45), "gun": Color(1.0, 0.25, 0.2)}
+const TITLES := {"bar": "Bar", "pharmacy": "Farmacia", "gun": "Armeria", "bank": "Banca"}
+const SIGN := {"bar": Color(1.0, 0.65, 0.2), "pharmacy": Color(0.2, 1.0, 0.45), "gun": Color(1.0, 0.25, 0.2), "bank": Color(1.0, 0.85, 0.35)}
+
+
+## Larghezza del vano sulla facciata: le banche sono grandi (atrio, sportelli, caveau).
+static func room_width(kind: String) -> float:
+	return 14.0 if kind == "bank" else ROOM_W
 
 
 ## Sceglie i locali e segna i palazzi che li ospitano con "venue" (indice nella lista restituita).
@@ -47,7 +52,7 @@ static func pick(data: Dictionary, spawn: Vector3) -> Array:
 		by_kind[k].append(poi)
 	var venues := []
 	var sp := Vector2(spawn.x, spawn.z)
-	for kind: String in ["gun", "pharmacy", "bar"]:
+	for kind: String in ["bank", "gun", "pharmacy", "bar"]:
 		var cands: Array = by_kind.get(kind, [])
 		var chosen: Array[Vector2] = []
 		var tried := {}
@@ -77,6 +82,10 @@ static func pick(data: Dictionary, spawn: Vector3) -> Array:
 			if v.is_empty():
 				continue
 			v["index"] = venues.size()
+			if kind == "bank":
+				var nb := venues.filter(func(x: Dictionary) -> bool: return x["kind"] == "bank").size()
+				v["brand"] = Banks.BRANDS[nb % Banks.BRANDS.size()]
+				v["name"] = "Banca · " + String(v["brand"])
 			blds[int(v["bid"])]["venue"] = venues.size()
 			venues.append(v)
 			chosen.append(at2)
@@ -122,11 +131,12 @@ static func _place(kind: String, poi: Array, blds: Array, polys: Array, boxes: A
 
 ## Il locale nel palazzo bid: sul lato lungo abbastanza più vicino al punto vero, con la porta a livello della strada.
 static func _place_in(kind: String, poi: Array, at: Vector2, bid: int, p: PackedVector2Array) -> Dictionary:
+	var rw := room_width(kind)
 	var edges := []
 	for k in p.size():
 		var a := p[k]
 		var c := p[(k + 1) % p.size()]
-		if a.distance_to(c) >= ROOM_W + 1.2:
+		if a.distance_to(c) >= rw + 1.2:
 			edges.append([Geometry2D.get_closest_point_to_segment(at, a, c).distance_to(at), k])
 	edges.sort_custom(func(x: Array, y: Array) -> bool: return x[0] < y[0])
 	for ek: Array in edges:
@@ -140,7 +150,7 @@ static func _place_in(kind: String, poi: Array, at: Vector2, bid: int, p: Packed
 		var n_in := Vector2(-u.y, u.x)
 		if not Geometry2D.is_point_in_polygon((a + c) * 0.5 + n_in * 1.0, p):
 			n_in = -n_in
-		var t := clampf((at - a).dot(u), ROOM_W * 0.5 + 0.6, length - ROOM_W * 0.5 - 0.6)
+		var t := clampf((at - a).dot(u), rw * 0.5 + 0.6, length - rw * 0.5 - 0.6)
 		if ground.is_valid():
 			# In collina: niente locali con la porta sopra o sotto il marciapiede (servirebbero scale).
 			var door := a + u * t
@@ -149,9 +159,9 @@ static func _place_in(kind: String, poi: Array, at: Vector2, bid: int, p: Packed
 			var further: float = ground.call(door.x - n_in.x * 6.0, door.y - n_in.y * 6.0)
 			if absf(outside - inside) > 0.4 or absf(further - inside) > 0.9:
 				continue
-		for depth: float in [6.5, 5.0]:
-			var e0 := a + u * (t - ROOM_W * 0.5)
-			var e1 := a + u * (t + ROOM_W * 0.5)
+		for depth: float in ([10.0, 8.5] if kind == "bank" else [6.5, 5.0]):
+			var e0 := a + u * (t - rw * 0.5)
+			var e1 := a + u * (t + rw * 0.5)
 			var ok := true
 			for q: Vector2 in [e0 + n_in * depth, e1 + n_in * depth, (e0 + e1) * 0.5 + n_in * depth, e0 + n_in * 1.0, e1 + n_in * 1.0]:
 				if not Geometry2D.is_point_in_polygon(q, p):
@@ -161,7 +171,7 @@ static func _place_in(kind: String, poi: Array, at: Vector2, bid: int, p: Packed
 				return {
 					"kind": kind, "name": title if String(poi[2]).to_lower() == title.to_lower() else "%s · %s" % [title, poi[2]],
 					"real": String(poi[2]), "bid": bid, "edge": edge,
-					"t0": t - ROOM_W * 0.5, "t1": t + ROOM_W * 0.5, "a": a, "u": u, "n_in": n_in, "depth": depth,
+					"t0": t - rw * 0.5, "t1": t + rw * 0.5, "a": a, "u": u, "n_in": n_in, "depth": depth,
 				}
 		if not ground.is_valid():
 			break  # senza quote: solo la facciata più vicina, come prima
@@ -219,7 +229,7 @@ static func build_room(city: CityBuilder, v: Dictionary) -> Dictionary:
 	var floor_acc := CityBuilder.Acc.new()
 	var furn := CityBuilder.Acc.new()
 	var dark := CityBuilder.Acc.new()
-	var W := ROOM_W
+	var W := float(v["t1"]) - float(v["t0"])
 	var H := ROOM_H
 	_q(floor_acc, to3.call(0, 0.0, 0.02), to3.call(W, 0.0, 0.02), to3.call(W, depth, 0.02), to3.call(0, depth, 0.02), Vector3.UP)
 	_q(walls, to3.call(0, 0.0, H), to3.call(W, 0.0, H), to3.call(W, depth, H), to3.call(0, depth, H), Vector3.DOWN)
@@ -243,6 +253,8 @@ static func build_room(city: CityBuilder, v: Dictionary) -> Dictionary:
 			_q(walls, to3.call(x0, 0, h[2]), to3.call(x1, 0, h[2]), to3.call(x1, WALL, h[2]), to3.call(x0, WALL, h[2]), Vector3.UP)
 		cur = x1
 	_q(walls, to3.call(cur, WALL, 0), to3.call(W, WALL, 0), to3.call(W, WALL, H), to3.call(cur, WALL, H), N)
+	if kind == "bank":
+		return Banks.furnish(city, v, to3, U, N, W, depth, H, walls, floor_acc, o)
 	# Bancone con la cassa, e scaffali sul fondo.
 	var yaw := atan2(U.z, U.x) * -1.0
 	var cz := depth - 1.7
@@ -268,6 +280,17 @@ static func build_room(city: CityBuilder, v: Dictionary) -> Dictionary:
 			_cyl(furn, to3.call(tx, 1.9, 0.72), 0.45, 0.04)
 			for s: float in [-0.7, 0.7]:
 				_cyl(dark, to3.call(tx + s, 1.9, 0.0), 0.18, 0.46)
+	var slots := []
+	if kind == "bar":
+		# Due slot machine contro le pareti laterali, tra i tavolini e il bancone.
+		var sz := clampf(cz - 1.25, 2.6, depth - 2.4)
+		for side: float in [0.0, 1.0]:
+			var sx := 0.42 if side == 0.0 else W - 0.42
+			var face := U if side == 0.0 else -U  # verso il centro della stanza
+			var base: Vector3 = to3.call(sx, sz, 0.0)
+			var yaw_s := atan2(face.x, face.z)
+			_slot_cabinet(city, base, yaw_s, int(v["index"]) * 2 + int(side))
+			slots.append([base + face * 0.95, yaw_s + PI, base + Vector3(0, 1.3, 0)])
 	var wood := StandardMaterial3D.new()
 	wood.albedo_color = {"bar": Color(0.38, 0.22, 0.12), "pharmacy": Color(0.9, 0.9, 0.88), "gun": Color(0.32, 0.33, 0.35)}[kind]
 	wood.roughness = 0.6
@@ -339,7 +362,120 @@ static func build_room(city: CityBuilder, v: Dictionary) -> Dictionary:
 		"clerk_yaw": atan2(-N.x, -N.z),
 		"entrance": to3.call(W * 0.5, -1.6, 0.0),
 		"door2d": o + u * (W * 0.5),
+		"slots": slots,  # [dove sta chi gioca, verso dove guarda, centro dello schermo]
 	}
+
+
+## Slot machine: mobile rosso e oro, schermo con i tre rulli, luce in cima che lampeggia, leva sul fianco.
+## Davanti = +Z locale (verso chi gioca).
+static func _slot_cabinet(city: CityBuilder, base: Vector3, yaw: float, seed_i: int) -> void:
+	var root := Node3D.new()
+	root.name = "Slot_%d" % seed_i
+	city.add_child(root)
+	root.global_transform = Transform3D(Basis(Vector3.UP, yaw), base)
+	var mat := func(col: Color, metal: float, rough: float, glow := 0.0) -> StandardMaterial3D:
+		var m := StandardMaterial3D.new()
+		m.albedo_color = col
+		m.metallic = metal
+		m.roughness = rough
+		if glow > 0.0:
+			m.emission_enabled = true
+			m.emission = col
+			m.emission_energy_multiplier = glow
+		return m
+	var red: StandardMaterial3D = mat.call(Color(0.55, 0.04, 0.06), 0.5, 0.3)
+	var gold: StandardMaterial3D = mat.call(Color(0.95, 0.72, 0.2), 0.9, 0.25)
+	var black: StandardMaterial3D = mat.call(Color(0.04, 0.04, 0.05), 0.3, 0.4)
+	var parts := [
+		[Vector3(0.62, 0.9, 0.55), Vector3(0, 0.45, 0), red],  # base
+		[Vector3(0.66, 0.06, 0.6), Vector3(0, 0.92, 0.02), gold],  # mensola
+		[Vector3(0.6, 0.75, 0.42), Vector3(0, 1.32, -0.05), red],  # corpo dello schermo
+		[Vector3(0.64, 0.05, 0.46), Vector3(0, 1.71, -0.05), gold],
+		[Vector3(0.6, 0.22, 0.4), Vector3(0, 1.85, -0.06), red],  # cimasa
+		[Vector3(0.5, 0.1, 0.25), Vector3(0, 0.99, 0.12), black],  # pulsantiera
+	]
+	for pr: Array in parts:
+		var bm := BoxMesh.new()
+		bm.size = pr[0]
+		bm.material = pr[2]
+		var mi := MeshInstance3D.new()
+		mi.mesh = bm
+		mi.position = pr[1]
+		root.add_child(mi)
+	# Schermo: tre rulli (Label3D luminose) dietro il vetro.
+	var screen := BoxMesh.new()
+	screen.size = Vector3(0.48, 0.34, 0.02)
+	screen.material = mat.call(Color(0.95, 0.93, 0.85), 0.0, 0.2, 0.6)
+	var sm := MeshInstance3D.new()
+	sm.mesh = screen
+	sm.position = Vector3(0, 1.36, 0.165)
+	root.add_child(sm)
+	var symbols := ["7", "BAR", "★"]
+	for k in 3:
+		var l := Label3D.new()
+		l.text = symbols[(k + seed_i) % 3]
+		l.font_size = 64
+		l.pixel_size = 0.0022
+		l.modulate = [Color(0.85, 0.05, 0.05), Color(0.1, 0.1, 0.12), Color(0.95, 0.6, 0.05)][(k + seed_i) % 3]
+		l.outline_size = 0
+		l.shaded = false
+		l.position = Vector3(-0.15 + k * 0.15, 1.36, 0.18)
+		root.add_child(l)
+	var title := Label3D.new()
+	title.text = "SLOT"
+	title.font_size = 72
+	title.pixel_size = 0.004
+	title.modulate = Color(1.0, 0.85, 0.3)
+	title.outline_size = 10
+	title.outline_modulate = Color(0.5, 0.05, 0.02)
+	title.shaded = false
+	title.position = Vector3(0, 1.86, 0.15)
+	root.add_child(title)
+	# Pulsanti luminosi e leva.
+	for k in 3:
+		var btn := CylinderMesh.new()
+		btn.top_radius = 0.03
+		btn.bottom_radius = 0.03
+		btn.height = 0.02
+		btn.material = mat.call([Color(1, 0.2, 0.1), Color(1, 0.85, 0.1), Color(0.2, 1, 0.3)][k], 0.0, 0.3, 2.5)
+		var bi := MeshInstance3D.new()
+		bi.mesh = btn
+		bi.position = Vector3(-0.14 + k * 0.14, 1.05, 0.18)
+		root.add_child(bi)
+	var lever := CylinderMesh.new()
+	lever.top_radius = 0.015
+	lever.bottom_radius = 0.02
+	lever.height = 0.45
+	lever.material = gold
+	var lv := MeshInstance3D.new()
+	lv.mesh = lever
+	lv.position = Vector3(0.36, 1.45, 0.0)
+	root.add_child(lv)
+	var knob := SphereMesh.new()
+	knob.radius = 0.05
+	knob.height = 0.1
+	knob.material = mat.call(Color(0.9, 0.05, 0.05), 0.2, 0.2)
+	var kn := MeshInstance3D.new()
+	kn.mesh = knob
+	kn.position = Vector3(0.36, 1.7, 0.0)
+	root.add_child(kn)
+	var lamp := OmniLight3D.new()
+	lamp.light_color = Color(1.0, 0.75, 0.3)
+	lamp.light_energy = 0.8
+	lamp.omni_range = 2.5
+	lamp.position = Vector3(0, 1.6, 0.5)
+	lamp.distance_fade_enabled = true
+	lamp.distance_fade_begin = 40.0
+	lamp.distance_fade_length = 10.0
+	root.add_child(lamp)
+	var body := StaticBody3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(0.66, 1.95, 0.6)
+	var cs := CollisionShape3D.new()
+	cs.shape = shape
+	cs.position = Vector3(0, 0.98, 0)
+	body.add_child(cs)
+	root.add_child(body)
 
 
 static func _q(acc: CityBuilder.Acc, a: Vector3, b: Vector3, c: Vector3, d: Vector3, n: Vector3, col := Color.WHITE) -> void:

@@ -72,6 +72,31 @@ var _capture_frames := 90
 var _frame := 0
 var _send_timer := 0.0
 var _time := 0.0
+var daynight: DayNight
+## Server dedicato (--server): ospita la partita senza personaggio e senza schermo (sul telefono sempre acceso).
+var server_mode := false
+var _server_log_t := 0.0
+var _server_upd_n := 0
+var _profile_t := 0.0
+const PROFILE_PATH := "user://profilo.json"
+var clans: Clans
+var banks: Banks
+var missions: Missions
+var homes: Homes
+var _home_ui: HomeUI
+var _missions_done: Array = []
+var bank_balance := 0  # conto corrente di chi gioca su questo PC (salvato nelle impostazioni)
+var _bank_ui: BankUI
+var _drill_bank := -1
+var _drill_t := 0.0
+var _last_hour := 0.0
+var fame := 0  # fama criminale di chi gioca su questo PC (salvata nelle impostazioni)
+var _clan_ui: ClanUI
+var _zone_label: Label
+var _prev_stars := 0
+var creative := false  # modalità creativa (solo da soli): armi, gadget, munizioni e soldi infiniti
+var _slot: SlotMachine
+var _clock_t := 0.0
 
 
 func _ready() -> void:
@@ -90,6 +115,10 @@ func _ready() -> void:
 	add_child(combat)
 	combat.net_fx = _send_fx
 	_spawn_cars()
+	daynight = DayNight.new()
+	daynight.name = "GiornoNotte"
+	add_child(daynight)
+	daynight.setup(_sun, _env, city)
 
 	_overview = Camera3D.new()
 	_overview.far = 3000
@@ -99,6 +128,9 @@ func _ready() -> void:
 	_load_settings()
 	_setup_hud()
 	_parse_args()
+	if _args.has("hour"):  # prova: --hour=22 ferma l'orologio a quell'ora
+		daynight.hour = float(_args["hour"])
+		daynight.frozen = true
 
 	var m := multiplayer
 	m.peer_connected.connect(_on_peer_connected)
@@ -129,7 +161,12 @@ func _ready() -> void:
 		# Prova senza toccare il router: cerca solo il router e legge l'indirizzo pubblico.
 		_upnp_thread = Thread.new()
 		_upnp_thread.start(_upnp_work.bind(false))
-	if _args.has("join"):
+	if _args.has("server"):
+		server_mode = true
+		Engine.max_fps = 60  # senza schermo girerebbe a vuoto e scalderebbe il telefono
+		print("SERVER: preparo il quartiere, poi apro la porta %d" % PORT)
+		_begin("host", "Server", 0, "")
+	elif _args.has("join"):
 		_begin("join", _args.get("name", my_name), _model_index, _args["join"])
 	elif _args.has("host"):
 		_begin("host", _args.get("name", my_name), _model_index, "")
@@ -171,6 +208,10 @@ func _setup_input() -> void:
 		"toggle_police": [KEY_F3],
 		"enter_car": [KEY_F],
 		"horn": [KEY_G],
+		"jetpack": [KEY_J],
+		"clan": [KEY_U],
+		"backup": [KEY_N],
+		"arrange": [KEY_O],
 	}
 	for action: String in keys:
 		if not InputMap.has_action(action):
@@ -330,6 +371,13 @@ func _setup_hud() -> void:
 	_street = _outlined(28)
 	_street.position = Vector2(24, 18)
 	layer.add_child(_street)
+	_zone_label = _outlined(19)
+	_zone_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_zone_label.offset_left = -360
+	_zone_label.offset_right = 360
+	_zone_label.offset_top = 14
+	_zone_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	layer.add_child(_zone_label)
 	_online = _outlined(16)
 	_online.position = Vector2(24, 58)
 	_online.modulate = Color(0.75, 1.0, 0.75)
@@ -413,11 +461,17 @@ func _setup_hud() -> void:
 	updater = Updater.new()
 	add_child(updater)
 	_menu.attach_updater(updater)
+	updater.available.connect(func(v: int) -> void:
+		if server_mode and _remote.is_empty():
+			print("SERVER: è uscita la versione %d, mi chiudo per aggiornarmi" % v)
+			if clans:
+				clans.save()
+			get_tree().quit())
 
 
 var _help: Label
 
-const HELP_KEYS := "WASD muoviti · Shift corri · Ctrl accovacciati · Q rotola · Spazio salta · destro mira · sinistro spara · R ricarica · Tab (tieni) armi · B TNT · E negozio · F auto · G clacson · M mappa · T chat · Esc menu"
+const HELP_KEYS := "WASD muoviti · Shift corri · Spazio salta · destro mira · sinistro spara · R ricarica · Tab armi · B TNT · E negozio · F auto · M mappa · U clan · N rinforzi · J jetpack · T chat · Esc menu"
 const HELP_PAD := "Joypad: levette muoviti/guarda · clic levetta sinistra (L3) corri · LB/L1 accovacciati · B/Cerchio rotola · A/Croce salta · LT/L2 mira · RT/R2 spara · X/Quadrato ricarica\nRB/R1 (tieni) armi · Y/Triangolo auto (RT gas, LT freno, R3 clacson) · croce: su negozio, giù TNT, sinistra ritorno, destra mappa · Start menu"
 
 
@@ -457,6 +511,9 @@ func _load_settings() -> void:
 		_model_index = cfg.get_value("player", "model", 0)
 		_address = cfg.get_value("net", "address", "")
 		quality_high = cfg.get_value("video", "high", true)
+		fame = cfg.get_value("crime", "fame", 0)
+		bank_balance = cfg.get_value("bank", "balance", 0)
+		_missions_done = cfg.get_value("missions", "done", [])
 		police_on = cfg.get_value("game", "police", true)
 		_apply_quality()
 
@@ -471,6 +528,9 @@ func _save_settings() -> void:
 	cfg.set_value("net", "address", _address)
 	cfg.set_value("video", "high", quality_high)
 	cfg.set_value("game", "police", police_on)
+	cfg.set_value("crime", "fame", fame)
+	cfg.set_value("bank", "balance", bank_balance)
+	cfg.set_value("missions", "done", missions.done if missions else _missions_done)
 	cfg.save(SETTINGS_PATH)
 
 
@@ -489,6 +549,7 @@ func _begin(mode_: String, name_: String, model_index: int, address: String) -> 
 	if _args.has("nopolice"):
 		police_on = false
 	_model_index = model_index
+	creative = mode_ == "solo" and (_menu.creative_check.button_pressed or _args.has("creative"))
 	if address != "":
 		_address = address
 	_save_settings()
@@ -502,7 +563,8 @@ func _begin(mode_: String, name_: String, model_index: int, address: String) -> 
 			_show_menu()
 			return
 		multiplayer.multiplayer_peer = peer
-		_open_internet()
+		if not server_mode:
+			_open_internet()
 	elif mode_ == "join":
 		var peer := ENetMultiplayerPeer.new()
 		var err := peer.create_client(address, PORT)
@@ -577,6 +639,10 @@ func _upnp_done(u: UPNP, res: Dictionary) -> void:
 
 ## Alla chiusura la porta sul router si richiude.
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		save_profile()
+		if clans and simulate:
+			clans.save()
 	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_PREDELETE:
 		if _upnp:
 			_upnp.delete_port_mapping(PORT, "UDP")
@@ -599,6 +665,15 @@ func _start_playing() -> void:
 		player.give_weapon("pistola", 36)
 		player.weapon = "pugni"
 		_players_root.add_child(player)
+		if server_mode:
+			# Il server non gioca: il suo personaggio sta fermo, invisibile e senza collisioni sotto la mappa.
+			player.visible = false
+			player.input_enabled = false
+			player.collision_layer = 0
+			player.collision_mask = 0
+			player.set_physics_process(false)
+		else:
+			_load_profile()
 		pedestrians = Pedestrians.new()
 		pedestrians.name = "Pedoni"
 		add_child(pedestrians)
@@ -613,6 +688,12 @@ func _start_playing() -> void:
 		police.setup(city, self, combat, traffic, pedestrians)
 		police.active = police_on
 		combat.crime.connect(_on_local_crime)
+		simulate = not _online_now() or multiplayer.is_server()
+		clans = Clans.new()
+		clans.name = "Clan"
+		add_child(clans)
+		clans.setup(self, city, combat, police, pedestrians)
+		clans.changed.connect(_on_clans_changed)
 		netsync = NetSync.new()
 		netsync.name = "MondoCondiviso"
 		netsync.world = self
@@ -621,6 +702,20 @@ func _start_playing() -> void:
 		shops.name = "Negozi"
 		add_child(shops)
 		shops.setup(city, player)
+		shops.discount = _drug_discount
+		banks = Banks.new()
+		banks.name = "Banche"
+		add_child(banks)
+		banks.setup(self, city, combat, police, pedestrians, shops)
+		missions = Missions.new()
+		missions.name = "Missioni"
+		add_child(missions)
+		missions.setup(self, city, combat)
+		missions.done = _missions_done.duplicate()
+		homes = Homes.new()
+		homes.name = "Case"
+		add_child(homes)
+		homes.setup(self, city)
 		scooters = Scooters.new()
 		scooters.name = "Monopattini"
 		add_child(scooters)
@@ -634,6 +729,8 @@ func _start_playing() -> void:
 		_wheel.setup(player)
 		_wheel.chosen.connect(_wheel_pick)
 		hud.wanted_info = _my_wanted
+		hud.clock = daynight.clock_text
+		hud.fame_info = func() -> int: return fame
 		_minimap.police_dots = _police_dots
 		_bigmap.police_dots = _police_dots
 		var amb := AudioStreamPlayer.new()
@@ -642,6 +739,21 @@ func _start_playing() -> void:
 		add_child(amb)
 		amb.play()
 		hud.shop_closed.connect(_on_shop_closed)
+		_slot = SlotMachine.new()
+		_layer.add_child(_slot)
+		_slot.closed.connect(_on_slot_closed)
+		_clan_ui = ClanUI.new()
+		_layer.add_child(_clan_ui)
+		_clan_ui.setup(self, clans)
+		_clan_ui.closed.connect(_on_slot_closed)
+		_bank_ui = BankUI.new()
+		_layer.add_child(_bank_ui)
+		_bank_ui.setup(self)
+		_bank_ui.closed.connect(_on_slot_closed)
+		_home_ui = HomeUI.new()
+		_layer.add_child(_home_ui)
+		_home_ui.setup(self, homes)
+		_home_ui.closed.connect(_on_slot_closed)
 		_minimap.setup(city, player, true)
 		_bigmap.setup(city, player, false)
 		_minimap.others = _other_players
@@ -653,6 +765,13 @@ func _start_playing() -> void:
 			for e: Array in city.enterables:
 				m.extra_pois.append(e.slice(0, 4))
 			m.extra_pois.append_array(shops.map_pois())
+			for pad: Vector2 in Heli.PADS:
+				m.extra_pois.append([pad.x, pad.y, "Elicottero", "heli"])
+			for c: Dictionary in clans.clans:
+				m.extra_pois.append([float(c["hq"][0]), float(c["hq"][2]), "Boss · %s (%s)" % [c["boss"], c["name"]], "boss"])
+			m.zones_fn = _zones_for_map
+			m.extra_pois.append_array(missions.map_pois())
+			m.extra_pois.append_array(homes.map_entries)
 	player.teleport(_spawn_point())
 	if _args.has("pos"):
 		var xz: PackedStringArray = _args["pos"].split(",")
@@ -669,6 +788,9 @@ func _start_playing() -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	_update_online()
 	_point_to_armory()
+	_set_creative(creative)
+	if not server_mode:
+		clan_request("fame", [fame])
 	if mode == "host":
 		var ips := StartMenu.my_addresses()
 		_system("Partita aperta. Gli amici entrano con: " + (", ".join(ips) if not ips.is_empty() else "il tuo indirizzo"))
@@ -772,7 +894,14 @@ func _on_server_disconnected() -> void:
 
 func _on_peer_connected(id: int) -> void:
 	net_version.rpc_id(id, Updater.local_version())
-	if player != null:
+	if multiplayer.is_server():
+		net_clock.rpc_id(id, daynight.hour)
+		if clans:
+			net_clan_state.rpc_id(id, clans.state_json())
+		if banks:
+			for bi in banks.banks.size():
+				net_bank.rpc_id(id, bi, banks.state_of(bi))
+	if player != null and not server_mode:
 		announce.rpc_id(id, my_name, MODELS[_model_index])
 	if multiplayer.is_server():
 		# Chi arriva dopo deve sapere dove sono finite le auto spostate e chi sta guidando (anche quelle rubate).
@@ -810,6 +939,13 @@ func _remove_remote(id: int) -> void:
 	_names.erase(id)
 
 
+## Ora del gioco decisa da chi ospita (ogni 5 secondi e a chi entra): tutti vedono lo stesso cielo.
+@rpc("authority", "call_remote", "unreliable")
+func net_clock(h: float) -> void:
+	if absf(daynight.hour - h) > 0.02 and not daynight.frozen:
+		daynight.hour = h
+
+
 ## Versioni diverse tra giocatori: avvisa chi deve aggiornare (0 = copia di sviluppo, non si confronta).
 @rpc("any_peer", "call_remote", "reliable")
 func net_version(v: int) -> void:
@@ -835,7 +971,9 @@ func announce(name_: String, model: String) -> void:
 		p.display_name = safe_name
 		p.car_lookup = _car_by_id
 		p.peer_id = id
-		p.hurt_remote = func(peer: int, amount: float) -> void: net_hurt.rpc_id(peer, amount, _my_peer())
+		# Chi ha colpito: il giocatore di questo PC, oppure 0 se è stato un personaggio del gioco (agenti, picciotti,
+		# sicari calcolati qui): così chi muore per mano loro non perde i soldi come in un omicidio tra giocatori.
+		p.hurt_remote = func(peer: int, amount: float, from_peer: int) -> void: net_hurt.rpc_id(peer, amount, _my_peer() if from_peer == _my_peer() else 0)
 		_players_root.add_child(p)
 		p.visible = false  # finché non arriva la prima posizione
 		_remote[id] = p
@@ -850,10 +988,10 @@ func announce(name_: String, model: String) -> void:
 
 
 @rpc("any_peer", "call_remote", "unreliable_ordered")
-func state(pos: Vector3, rot: float, anim: String, car: int, weapon_id: String) -> void:
+func state(pos: Vector3, rot: float, anim: String, car: int, weapon_id: String, flags: int) -> void:
 	var p: Player = _remote.get(multiplayer.get_remote_sender_id())
 	if p != null:
-		p.apply_state(pos, rot, anim, car, weapon_id)
+		p.apply_state(pos, rot, anim, car, weapon_id, flags)
 		p.visible = true
 
 
@@ -877,6 +1015,45 @@ func _spawn_cars() -> void:
 		car.global_transform = spots[i]
 		cars.append(car)
 	_parked_count = cars.size()
+	# Elicotteri pilotabili, uno per piazzola (stessi id su tutti i PC).
+	for i in Heli.PADS.size():
+		var pad: Vector2 = Heli.PADS[i]
+		var at := Vector3(pad.x, city.surface_at(pad.x, pad.y) + 0.05, pad.y)
+		_helipad(at)
+		var heli := Heli.new().setup_heli(Heli.BASE_ID + i, at, 0.4)
+		heli.combat = combat
+		heli.on_destroyed = _on_car_destroyed
+		root.add_child(heli)
+		heli.global_transform = Transform3D(Basis(Vector3.UP, 0.4), at)
+		cars.append(heli)
+		_extra_cars[heli.car_id] = heli
+
+
+## Piazzola: cerchio giallo e grande H bianca sul prato.
+func _helipad(at: Vector3) -> void:
+	var ring := MeshInstance3D.new()
+	var torus := TorusMesh.new()
+	torus.inner_radius = 6.2
+	torus.outer_radius = 6.7
+	torus.rings = 48
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color(1.0, 0.82, 0.1)
+	m.roughness = 0.8
+	torus.material = m
+	ring.mesh = torus
+	ring.scale = Vector3(1, 0.04, 1)
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ring)
+	ring.global_position = at + Vector3(0, 0.02, 0)
+	var h := Label3D.new()
+	h.text = "H"
+	h.font_size = 400
+	h.pixel_size = 0.02
+	h.outline_size = 0
+	h.modulate = Color(0.95, 0.95, 0.95)
+	h.rotation = Vector3(-PI / 2, 0, 0)
+	add_child(h)
+	h.global_position = at + Vector3(0, 0.05, 0)
 
 
 func _car_by_id(id: int) -> Car:
@@ -1178,7 +1355,7 @@ func _input(event: InputEvent) -> void:
 
 
 func _open_pause() -> void:
-	_pause.refresh(quality_high, police_on, simulate, my_name, _online_now())
+	_pause.refresh(quality_high, police_on, simulate, my_name, _online_now(), creative)
 	_pause.open()
 	player.input_enabled = false
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -1206,6 +1383,9 @@ func _on_pause_action(id: String) -> void:
 		"police":
 			if simulate:
 				_set_police(not police_on)
+		"creative":
+			if not _online_now():
+				_set_creative(not creative)
 		"model":
 			_model_index = (_model_index + 1) % MODELS.size()
 			player.set_model(MODELS[_model_index])
@@ -1214,12 +1394,15 @@ func _on_pause_action(id: String) -> void:
 				announce.rpc(my_name, MODELS[_model_index])
 		"quit":
 			_save_settings()
+			save_profile()
+			if clans:
+				clans.save()
 			get_tree().quit()
-	_pause.refresh(quality_high, police_on, simulate, my_name, _online_now())
+	_pause.refresh(quality_high, police_on, simulate, my_name, _online_now(), creative)
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if player == null or _menu.visible or _pause.visible:
+	if player == null or _menu.visible or _pause.visible or (_slot and _slot.visible) or (_clan_ui and _clan_ui.visible) or (_bank_ui and _bank_ui.visible) or (_home_ui and _home_ui.visible):
 		return
 	if event.is_action_pressed("pause") and not _bigmap.visible and not (hud and hud.shop_open()):
 		_open_pause()
@@ -1244,7 +1427,25 @@ func _unhandled_input(event: InputEvent) -> void:
 		_toggle_car()
 	elif event.is_action_pressed("respawn") and not player.dead:
 		_leave_car()
-		player.teleport(_spawn_point())
+		if homes.inside != "":
+			homes.leave()
+		player.teleport(_respawn_point())
+	elif event.is_action_pressed("interact") and not hud.shop_open() and not clans.boss_near(player.global_position, 2.6).is_empty() and not player.mounted() and not player.dead:
+		_open_clan_ui(int(clans.boss_near(player.global_position, 2.6)[1]))
+	elif event.is_action_pressed("interact") and not hud.shop_open() and not player.mounted() and not player.dead and _home_interact():
+		pass
+	elif event.is_action_pressed("arrange") and homes.inside != "" and not homes.visiting:
+		_home_ui.open_edit()
+	elif event.is_action_pressed("interact") and not hud.shop_open() and not player.mounted() and not player.dead and missions.try_start(player.global_position):
+		pass
+	elif event.is_action_pressed("interact") and not hud.shop_open() and not player.mounted() and not player.dead and _bank_interact():
+		pass
+	elif event.is_action_pressed("clan") and not player.dead:
+		_open_clan_ui(-1)
+	elif event.is_action_pressed("backup") and not player.dead:
+		clan_request("backup", [])
+	elif event.is_action_pressed("interact") and not hud.shop_open() and not _slot_here().is_empty() and not player.mounted() and not player.dead:
+		_open_slot()
 	elif event.is_action_pressed("interact") and not hud.shop_open():
 		var shop := shops.shop_here()
 		if not shop.is_empty() and player.vehicle == null and not player.dead:
@@ -1253,6 +1454,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 		elif not player.dead and not player.mounted():
 			_try_sell()
+	elif creative and event is InputEventKey and event.pressed and not event.echo and event.physical_keycode == KEY_K:
+		_call_heli()
+	elif event.is_action_pressed("jetpack") and player.has_jetpack:
+		player.jet_worn = not player.jet_worn
+		_system("Jetpack " + ("indossato: in aria tieni premuto Spazio." if player.jet_worn else "tolto (J per rimetterlo)."))
 	elif event.is_action_pressed("horn") and player.vehicle:
 		player.vehicle.honk()
 	elif event.is_action_pressed("detonate"):
@@ -1295,6 +1501,10 @@ func _physics_process(delta: float) -> void:
 	if not _online_now():
 		return
 	if multiplayer.is_server():
+		_clock_t -= delta
+		if _clock_t <= 0.0:
+			_clock_t = 5.0
+			net_clock.rpc(daynight.hour)
 		# Mondo condiviso: a ogni giocatore lo stato di pedoni, traffico e polizia che ha vicino.
 		_world_timer += delta
 		if _world_timer >= 0.1:
@@ -1306,13 +1516,14 @@ func _physics_process(delta: float) -> void:
 			for id: int in _remote:
 				var rp: Player = _remote[id]
 				net_wanted.rpc_id(id, police.active, w)
-				for part: PackedFloat32Array in netsync.build_for(rp.global_position, pedestrians, traffic, police):
+				for part: PackedFloat32Array in netsync.build_for(rp.global_position, pedestrians, traffic, police, clans, banks):
 					net_world.rpc_id(id, _world_frame, part)
 	_send_timer += delta
 	if _send_timer >= 1.0 / SEND_RATE:
 		_send_timer = 0.0
-		var s := player.net_state()
-		state.rpc(s[0], s[1], s[2], s[3], s[4])
+		if not server_mode:
+			var s := player.net_state()
+			state.rpc(s[0], s[1], s[2], s[3], s[4], s[5])
 		for c: Car in [player.vehicle, _pending_release]:
 			if c:
 				car_state.rpc(c.car_id, c.global_transform, c.steering / Car.MAX_STEER)
@@ -1325,7 +1536,7 @@ func _process(delta: float) -> void:
 	if _respawn_timer >= 0.0:
 		_respawn_timer -= delta
 		if _respawn_timer < 0.0 and player and player.dead:
-			player.respawn_at(_spawn_point())
+			player.respawn_at(_respawn_point())
 	if player == null:
 		# Volo lento sopra il quartiere mentre si sceglie nel menu.
 		var a := _time * 0.05
@@ -1338,30 +1549,92 @@ func _process(delta: float) -> void:
 			s = "Tevere (a nuoto)"
 		combat.my_peer = _my_peer()
 		_street.text = s
-		if player.vehicle:
+		_update_zone_label()
+		var st: int = my_stars()
+		if _prev_stars >= 1 and st == 0 and not player.dead:
+			add_fame(Crime.FAME["escape"] * _prev_stars / 2)  # seminata la polizia
+			_system("Hai seminato la polizia: fama +%d." % (Crime.FAME["escape"] * _prev_stars / 2))
+		_prev_stars = st
+		if player.vehicle is Heli:
+			_hint.text = ("F scendi · Spazio/Ctrl su-giù · WASD vola · Shift veloce · clic sx mitra · dx o R razzi"
+				if (player.vehicle as Heli).rpm > 0.9 else "Il rotore prende giri… (F scendi)")
+		elif player.vehicle:
 			_hint.text = "F / Y scendi · Spazio / A freno a mano · clic sinistro / LB spara"
 		elif player.scooter >= 0:
 			_hint.text = "W / RT avanti · S / LT frena · A-D sterza · clic sinistro / LB spara · F / Y scendi"
 		elif scooters.nearest(player.global_position, 2.2):
 			_hint.text = "F / Y / Triangolo sali sul monopattino"
+		elif _nearest_car(4.0, true) is Heli:
+			_hint.text = "F / Y / Triangolo sali sull'elicottero"
 		elif _nearest_car(4.0, true):
 			_hint.text = "F / Y / Triangolo sali in auto"
 		elif traffic and not _nearest_traffic(5.0).is_empty():
 			_hint.text = "F / Y / Triangolo ruba l'auto (tiri fuori chi guida)"
+		elif (_slot and _slot.visible) or (_clan_ui and _clan_ui.visible) or (_bank_ui and _bank_ui.visible) or (_home_ui and _home_ui.visible):
+			_hint.text = ""
+		elif _home_hint() != "":
+			_hint.text = _home_hint()
+		elif _drill_bank >= 0:
+			_hint.text = "Trapano sulla porta del caveau: %d%% (resta qui, F o E per smettere)" % int(_drill_t / Banks.DRILL_TIME * 100.0)
+		elif missions.hint(player.global_position) != "" and not player.mounted():
+			_hint.text = missions.hint(player.global_position)
+		elif _bank_hint() != "":
+			_hint.text = _bank_hint()
+		elif not clans.boss_near(player.global_position, 2.6).is_empty() and not player.mounted():
+			var bn: Array = clans.boss_near(player.global_position, 2.6)
+			var bc: Dictionary = clans.clan(int(bn[1]))
+			_hint.text = "E / croce su: parla con %s (%s)" % [bc.get("boss", "il boss"), bc.get("name", "")]
+		elif not _slot_here().is_empty() and not player.mounted():
+			_hint.text = "E / croce su: gioca alla slot machine"
 		elif player.stash > 0 and _nearest_passerby(2.5) != null:
-			_hint.text = "E / croce su: offri un pacchetto"
+			_hint.text = "E / croce su: offri la roba"
 		elif String(Weapons.info(player.weapon)["kind"]) in ["gun", "rocket"] and _near_clerk(8.0):
 			_hint.text = "Mira al commesso (tasto destro / LT) per rapinare il locale"
 		else:
 			_hint.text = ""
 	if player and not player.dead:
 		_check_robbery(delta)
+	if player and creative:
+		_creative_refill()
+	if player and server_mode:
+		_server_log_t -= delta
+		if _server_log_t <= 0.0:
+			_server_log_t = 60.0
+			# Ogni 10 minuti guarda se è uscita una versione nuova: se non c'è nessuno, si chiude e lo script
+			# del telefono riparte con quella nuova.
+			_server_upd_n += 1
+			if _server_upd_n % 10 == 0 and _remote.is_empty() and updater:
+				updater.check()
+			print("SERVER %s: %d giocatori (%s), %d fps, ora del gioco %s" % [Time.get_time_string_from_system(), _remote.size(),
+				", ".join(_names.values()), Engine.get_frames_per_second(), daynight.clock_text()])
+	elif player:
+		_profile_t -= delta
+		if _profile_t <= 0.0:
+			_profile_t = 20.0
+			save_profile()
+	if player:
+		_fame_tick(delta)
+		_drill_tick(delta)
+		# Interessi del conto a mezzanotte.
+		if _last_hour > 23.0 and daynight.hour < 1.0 and bank_balance > 0:
+			var interest := mini(2000, bank_balance / 100)
+			bank_balance += interest
+			save_bank()
+			_system("La banca ti ha accreditato € %d di interessi." % interest)
+		_last_hour = daynight.hour
+	if player and _args.has("jettest") and _frame % 30 == 0:
+		print("jetpack: quota %.1f  jet %s  carburante %.2f  armi %d" % [player.global_position.y - city.surface_at(player.global_position.x, player.global_position.z), player.jet_on, player.jet_fuel, player.owned_weapons().size()])
+	if player and _args.has("god"):
+		player.health = Player.MAX_HEALTH  # prova: non si muore
 	if player and _dest != null:
 		_route_t -= delta
 		if _route_t <= 0.0:
 			_route_t = 1.0
 			_update_route()
-	if player and player.vehicle:
+	if player and player.vehicle is Heli:
+		var v := player.vehicle
+		_speed.text = "%d km/h  %d m" % [roundi(v.speed_kmh()), roundi(v.global_position.y - city.surface_at(v.global_position.x, v.global_position.z))]
+	elif player and player.vehicle:
 		_speed.text = "%d km/h" % roundi(player.vehicle.speed_kmh())
 	elif player and player.scooter >= 0:
 		_speed.text = "%d km/h" % roundi(player._ride_speed * 3.6)
@@ -1383,6 +1656,111 @@ func _process(delta: float) -> void:
 			_toggle_car()
 			if _args["drive"] == "go":
 				Input.action_press("move_forward")
+	if player and police and _args.has("wanted") and not player.dead:
+		# Prova: --wanted=n tiene il giocatore ricercato con n stelle.
+		police.wanted[_my_peer()] = int(_args["wanted"])
+		police.calm[_my_peer()] = 0.0
+		police.last_seen[_my_peer()] = player.global_position
+		if _frame % 120 == 0:
+			for n: Node in police.get_children():
+				if n is Police.PoliceHeli:
+					print("elicottero polizia %s %d: a %d m, quota %d, vita %d, via %s · io vita %d" % [str(n.global_position.round()), n.nid, roundi(n.global_position.distance_to(player.global_position)), roundi(n.global_position.y - player.global_position.y), roundi(n.health), n.leaving, roundi(player.health)])
+	if player and _args.has("slot") and not _args.has("slot_in") and _time > 2.0:
+		_args["slot_in"] = true  # prova: --slot=n davanti alla prima slot del bar n (indice nei locali) e la apre
+		var bars := []
+		for i in city.venues.size():
+			if city.venues[i]["kind"] == "bar":
+				bars.append(i)
+		var room: Dictionary = city.venue_rooms[bars[int(_args["slot"]) % bars.size()]]
+		var sl: Array = room["slots"][0]
+		player.teleport(sl[0] + Vector3(0, 0.2, 0))
+		_open_slot()
+	if _slot and _args.has("slotspin") and _slot.visible and not _args.has("slot_spun") and _time > float(_args["slotspin"]):
+		_args["slot_spun"] = true
+		_slot.spin()
+	if player and _args.has("boss") and clans and not _args.has("boss_done"):
+		# Prova: --boss=n davanti al boss del clan n; dopo 4 secondi apre il dialogo.
+		var bc: Dictionary = clans.clan(int(_args["boss"]))
+		var hq := Vector3(float(bc["hq"][0]), float(bc["hq"][1]), float(bc["hq"][2]))
+		if not _args.has("boss_tp"):
+			_args["boss_tp"] = true
+			player.teleport(hq + Vector3(0, 0.5, 3.0))
+			player.cam_yaw = 0.0
+			player.cam_pitch = -0.15
+		elif _time > 5.0 and not clans.boss_near(player.global_position, 4.0).is_empty():
+			_args["boss_done"] = true
+			_open_clan_ui(int(_args["boss"]))
+	if player and _args.has("hittest"):
+		# Prova (chi ospita): entra nel Clan di Prati e manda il primo sicario contro --hittest=Nome.
+		if not _args.has("ht1") and _time > 3.0:
+			_args["ht1"] = true
+			fame = 400
+			player.money = 200000
+			clan_request("fame", [fame])
+			clan_request("join", [3])
+		elif not _args.has("ht2") and _time > 16.0:
+			_args["ht2"] = true
+			clan_request("contract", [String(_args["hittest"]), 0])
+		elif _frame % 120 == 0 and _args.has("ht2"):
+			for n: Node in clans.get_children():
+				if n is Clans.Soldier and (n as Clans.Soldier).role == "hitman":
+					var tgt: Node3D = (n as Clans.Soldier).target
+					print("sicario %s: vita %d, a %d m dal bersaglio" % [(n as Clans.Soldier).display, roundi((n as Clans.Soldier).health), roundi(n.global_position.distance_to(tgt.global_position)) if tgt else -1])
+	if player and _args.has("profiletest") and not _args.has("pt_done") and _time > 3.0:
+		_args["pt_done"] = true
+		print("profilo caricato: soldi %d, armi %s, droga %s, jetpack %s" % [player.money, player.owned_weapons(), player.drugs, player.has_jetpack])
+		if String(_args["profiletest"]) == "scrivi":
+			player.money = 12345
+			player.give_weapon("fucile", 60, false)
+			player.drugs = {"erba": 7}
+			player.has_jetpack = true
+			save_profile()
+			print("profilo scritto")
+	if player and _args.has("hometest"):
+		_home_test()
+	if player and _args.has("mission"):
+		_mission_test()
+	if player and _args.has("drilltest"):
+		var db: Dictionary = banks.banks[0]
+		if not _args.has("dt1") and _time > 3.0:
+			_args["dt1"] = true
+			var door: Vector3 = db["room"]["vault_door"]
+			player.teleport(door - (db["room"]["n"] as Vector3) * 1.2 + Vector3(0, 0.3, 0))
+		elif not _args.has("dt2") and _time > 4.0:
+			_args["dt2"] = true
+			print("trapano: inizio, vicino al caveau %d" % banks.vault_near(player.global_position))
+			_bank_interact()
+		elif _frame % 120 == 0 and _args.has("dt2"):
+			print("trapano t=%d: %d%%, caveau aperto %s, stelle %d" % [int(_time), int(_drill_t / Banks.DRILL_TIME * 100), db["st"]["open"], my_stars()])
+	if player and _args.has("banktest"):
+		_bank_test()
+	if player and _args.has("clantest"):
+		_clan_test()
+	if player and _args.has("clantest2"):
+		_clan_test2()
+	if player and _args.has("press"):
+		# Prova: --press=azione@inizio-fine,... tiene premute delle azioni in quegli intervalli (secondi).
+		for item: String in String(_args["press"]).split(","):
+			var parts := item.split("@")
+			var span := parts[1].split("-")
+			var on := _time >= float(span[0]) and _time < float(span[1])
+			if on != Input.is_action_pressed(parts[0]):
+				if on:
+					Input.action_press(parts[0])
+				else:
+					Input.action_release(parts[0])
+	if player and _args.has("heli") and not _args.has("heli_in") and _time > 2.0:
+		_args["heli_in"] = true  # prova: sale sull'elicottero numero --heli=n
+		var hc: Car = _extra_cars.get(Heli.BASE_ID + int(_args["heli"]))
+		player.teleport(hc.global_position + Vector3(2.5, 0.5, 0))
+		_toggle_car()
+	if player and _args.has("heli") and player.vehicle and _frame % 60 == 0:
+		var hv := player.vehicle
+		print("volo: pos %s  giri %.2f  vel %.0f km/h  vita %d  lift %.1f fwd %.1f vy %.1f" % [hv.global_position.round(), (hv as Heli).rpm, hv.speed_kmh(), roundi(hv.health), (hv as Heli)._in_lift, (hv as Heli)._in_fwd, hv.linear_velocity.y])
+	if player and _args.has("helishot") and _time > float(String(_args["helishot"]).split(":")[0]) and not _args.has("helishot_done"):
+		_args["helishot_done"] = true
+		var hs := String(_args["helishot"])
+		get_viewport().get_texture().get_image().save_png(hs.substr(hs.find(":") + 1))
 	if player and _args.has("drive") and player.vehicle and _frame % 60 == 0:
 		var v := player.vehicle
 		print("guida: pos %s  quota terreno %.1f  velocità %.0f km/h" % [v.global_position.round(), city.surface_at(v.global_position.x, v.global_position.z), v.linear_velocity.length() * 3.6])
@@ -1692,6 +2070,8 @@ func net_killed(victim: String, killer: int) -> void:
 			police.clear(sender)
 	var by: String = my_name if killer == multiplayer.get_unique_id() else _names.get(killer, "")
 	_system("%s è stato ucciso%s." % [victim, (" da " + by) if by != "" else ""])
+	if simulate and clans:
+		clans.on_player_killed(victim)
 
 
 @rpc("any_peer", "call_remote", "reliable")
@@ -1722,8 +2102,85 @@ func _on_player_died(by_peer: int) -> void:
 		police.clear(_my_peer())
 	if _online_now():
 		net_killed.rpc(my_name, by_peer)
+	elif clans:
+		clans.on_player_killed(my_name)
+	if missions and missions.active != "":
+		missions.fail("Sei morto.")
 	else:
 		_system("Sei morto.")
+
+
+## Slot machine davanti a cui si trova il giocatore ([posizione, direzione, schermo]) o [].
+func _slot_here() -> Array:
+	if player == null:
+		return []
+	var p := player.global_position
+	for room: Dictionary in city.venue_rooms:
+		for sl: Array in room.get("slots", []):
+			var at: Vector3 = sl[0]
+			if Vector2(at.x - p.x, at.z - p.z).length() < 1.2 and absf(at.y - p.y) < 1.5:
+				return sl
+	return []
+
+
+func _open_slot() -> void:
+	var sl := _slot_here()
+	if sl.is_empty():
+		return
+	player.input_enabled = false
+	player.cam_yaw = float(sl[1]) + PI  # la camera alle spalle, verso lo schermo
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_slot.open(player)
+
+
+## Modalità creativa: tutte le armi, munizioni e soldi che non finiscono, jetpack, giubbotto; K fa arrivare
+## un elicottero. Solo da soli (in rete sarebbe un vantaggio sugli altri).
+func _set_creative(on: bool) -> void:
+	var was := creative
+	creative = on and not _online_now()
+	player.creative = creative
+	if creative:
+		for id: String in Weapons.ORDER:
+			if int(Weapons.info(id).get("price", 0)) >= 0:
+				player.give_weapon(id, 999, false)
+		player.has_jetpack = true
+		player.armor = Player.MAX_ARMOR
+		_system("Modalità creativa: armi, munizioni, jetpack e soldi infiniti. K: fai arrivare un elicottero.")
+	elif was:
+		player.money = mini(player.money, 50000)
+		_system("Modalità creativa spenta.")
+
+
+func _creative_refill() -> void:
+	player.money = 9999999
+	for id: String in player.ammo.keys():
+		var w := Weapons.info(id)
+		if String(w["kind"]) == "melee":
+			continue
+		player.ammo[id] = 999
+		if w.has("mag"):
+			player.clip[id] = int(w["mag"])
+
+
+## Creativa: l'elicottero della prima piazzola arriva qui davanti (nuovo, se era distrutto).
+func _call_heli() -> void:
+	var h: Heli = _extra_cars.get(Heli.BASE_ID)
+	if h == null or h.driven_locally:
+		return
+	if h.destroyed:
+		h._restore()
+	var yaw := player.cam_yaw + PI
+	var at := player.global_position + Vector3(sin(yaw), 0, cos(yaw)) * 9.0
+	at.y = city.surface_at(at.x, at.z) + 0.1
+	h.driver_peer = 0
+	h.freeze = true
+	h.global_transform = Transform3D(Basis(Vector3.UP, yaw), at)
+	_system("Elicottero qui davanti: F per salire.")
+
+
+func _on_slot_closed() -> void:
+	player.input_enabled = true
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _on_shop_closed() -> void:
@@ -2300,7 +2757,7 @@ func _cops_test() -> void:
 ## Giocatori in partita per id di rete (questo PC e gli altri), per pedoni, traffico e polizia.
 func players() -> Dictionary:
 	var out := {}
-	if player:
+	if player and not server_mode:
 		out[_my_peer()] = player
 	for id: int in _remote:
 		var rp: Player = _remote[id]
@@ -2341,7 +2798,7 @@ func _nearest_passerby(max_dist: float) -> Node3D:
 	var best: Node3D = null
 	var best_d := max_dist
 	for n: Node in get_tree().get_nodes_in_group("pedestrian"):
-		if n is Police.Cop or n.get_meta("police", false) or n.has_meta("clerk") or n.has_meta("dealer") or n.get_meta("dead", false):
+		if n is Police.Cop or n.get_meta("police", false) or n.has_meta("clerk") or n.has_meta("dealer") or n.get_meta("dead", false) or n.has_meta("gang"):
 			continue
 		if n is Pedestrians.Pedestrian and (n as Pedestrians.Pedestrian).dead:
 			continue
@@ -2353,7 +2810,8 @@ func _nearest_passerby(max_dist: float) -> Node3D:
 
 
 ## Probabilità dello spaccio: 1 su 20 compra, 1 su 20 chiama la polizia, gli altri non sono interessati.
-const SELL_BUY := 0.05
+const SELL_BUY := 0.3  # di giorno 3 passanti su 10 comprano (se hai quello che cercano)
+const SELL_BUY_NIGHT := 0.42
 const SELL_SNITCH := 0.05
 
 
@@ -2369,21 +2827,57 @@ func _try_sell() -> void:
 		_system("Gliel'hai già chiesto.")
 		return
 	ped.set_meta("asked", true)
+	var night := daynight.is_night()
+	# Cosa cerca: erba e fumo più spesso; di notte più MD, LSD e cocaina.
+	var total := 0.0
+	var weights := {}
+	for id: String in Crime.DRUG_ORDER:
+		var w := float(Crime.DRUGS[id]["demand"]) * (1.8 if night and id in ["md", "lsd", "cocaina"] else 1.0)
+		weights[id] = w
+		total += w
+	var pick := randf() * total
+	var want: String = Crime.DRUG_ORDER[0]
+	for id: String in Crime.DRUG_ORDER:
+		pick -= float(weights[id])
+		if pick <= 0.0:
+			want = id
+			break
 	var r := randf()
-	if r < SELL_BUY:
-		var price := randi_range(60, 110)
-		player.stash -= 1
-		player.money += price
-		Sfx.play2d("coin", -6.0)
-		_system("Venduto un pacchetto: € %d (te ne restano %d)." % [price, player.stash])
-		if ped is Pedestrians.Pedestrian:
-			(ped as Pedestrians.Pedestrian).chat_pause()
-	elif r < SELL_BUY + SELL_SNITCH:
+	if r < SELL_SNITCH:
 		_system("Ha chiamato la polizia!")
 		_on_local_crime("dealing", player.global_position)
 		if ped is Pedestrians.Pedestrian:
 			(ped as Pedestrians.Pedestrian).scare(player.global_position)
 		return
+	elif r < SELL_SNITCH + (SELL_BUY_NIGHT if night else SELL_BUY):
+		var have := want if int(player.drugs.get(want, 0)) > 0 else ""
+		var factor := 1.0
+		if have == "" and randf() < 0.45:
+			# Non hai quello che cerca: a volte si accontenta d'altro, pagandolo meno.
+			for id: String in Crime.DRUG_ORDER:
+				if int(player.drugs.get(id, 0)) > 0:
+					have = id
+					factor = 0.85
+					break
+		if have == "":
+			_system("Cercava %s, e tu non ce l'hai." % Crime.DRUGS[want]["name"])
+		else:
+			var d: Dictionary = Crime.DRUGS[have]
+			var price := int(randi_range(int(d["sell"][0]), int(d["sell"][1])) * factor * (1.2 if night and have in ["md", "lsd", "cocaina"] else 1.0))
+			var z := Crime.zone_of(Vector2(player.global_position.x, player.global_position.z))
+			var mine := clans.clan_of(my_name)
+			var net := price
+			if mine >= 0 and clans.zone_owner(z) == mine:
+				net = int(price * (1.0 - Clans.PIZZO))  # la quota al clan
+			player.drugs[have] = int(player.drugs[have]) - 1
+			if int(player.drugs[have]) <= 0:
+				player.drugs.erase(have)
+			player.money += net
+			Sfx.play2d("coin", -6.0)
+			_system("Venduta una dose di %s: € %d%s (ti restano %d dosi)." % [d["name"], net, (" (€ %d al clan)" % (price - net)) if net < price else "", player.stash])
+			clan_request("sale", [have, price, player.global_position])
+			if ped is Pedestrians.Pedestrian:
+				(ped as Pedestrians.Pedestrian).chat_pause()
 	else:
 		_system("Non gli interessa.")
 	if _cop_sees_me():
@@ -2490,6 +2984,10 @@ func net_ammo(weapon_id: String, rounds: int) -> void:
 func crime(kind: String, pos: Vector3, peer: int) -> void:
 	if simulate and police and peer > 0:
 		police.report(kind, pos, peer)
+		if clans:
+			clans.on_crime(kind, pos, peer)
+		if banks:
+			banks.on_crime(kind, pos, peer)
 
 
 func _on_local_crime(kind: String, pos: Vector3) -> void:
@@ -2552,6 +3050,578 @@ func net_money(amount: int) -> void:
 	if player:
 		player.money += clampi(amount, 0, 10000000)  # anche i soldi lasciati da un altro giocatore ucciso
 		Sfx.play2d("coin", -6.0)
+
+
+# --- Profilo del giocatore (resta tra una partita e l'altra) -----------------------------------------
+
+
+## Soldi in tasca, armi e colpi, droga, jetpack, giubbotto: salvati sul PC di chi gioca ogni 20 secondi e all'uscita.
+## In modalità creativa, sul server e nelle prove non si salva niente.
+func save_profile() -> void:
+	if player == null or server_mode or creative or ((_args.has("autoquit") or _args.has("capture")) and not _args.has("profiletest")):
+		return
+	var d := {"money": player.money, "ammo": player.ammo, "clip": player.clip, "weapon": player.weapon,
+		"drugs": player.drugs, "jetpack": player.has_jetpack, "jet_worn": player.jet_worn, "armor": player.armor}
+	var f := FileAccess.open(PROFILE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(d))
+
+
+func _load_profile() -> void:
+	if ((_args.has("autoquit") or _args.has("capture")) and not _args.has("profiletest")) or not FileAccess.file_exists(PROFILE_PATH):
+		return
+	var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(PROFILE_PATH))
+	if not d is Dictionary:
+		return
+	player.money = int(d.get("money", player.money))
+	player.ammo = {}
+	player.clip = {}
+	for id: String in (d.get("ammo", {}) as Dictionary):
+		player.ammo[id] = int(d["ammo"][id])
+	for id: String in (d.get("clip", {}) as Dictionary):
+		player.clip[id] = int(d["clip"][id])
+	if not player.ammo.has("pugni"):
+		player.ammo["pugni"] = -1
+	player.weapon = String(d.get("weapon", "pugni")) if player.ammo.has(String(d.get("weapon", ""))) else "pugni"
+	player.drugs = {}
+	for id: String in (d.get("drugs", {}) as Dictionary):
+		player.drugs[id] = int(d["drugs"][id])
+	player.has_jetpack = bool(d.get("jetpack", false))
+	player.jet_worn = bool(d.get("jet_worn", true))
+	player.armor = float(d.get("armor", 0.0))
+
+
+# --- Case -------------------------------------------------------------------------------------------
+
+
+## Dove si rinasce (e dove porta H): davanti alla propria casa più vicina, se se ne ha una.
+func _respawn_point() -> Vector3:
+	if homes:
+		var h := homes.nearest_owned(player.global_position)
+		if not h.is_empty():
+			var d: Vector3 = h["door"]
+			return d + Vector3(0, 1.0, 0)
+	return _spawn_point()
+
+
+func _home_interact() -> bool:
+	if homes == null:
+		return false
+	var p := player.global_position
+	if homes.inside != "":
+		if homes.exit_near(p):
+			homes.leave()
+			return true
+		var u := homes.usable_near(p)
+		if not u.is_empty() and not homes.visiting:
+			match String(u[1]):
+				"safe":
+					_home_ui.open_safe()
+				"wardrobe":
+					_model_index = (_model_index + 1) % MODELS.size()
+					player.set_model(MODELS[_model_index])
+					_save_settings()
+					if _online_now():
+						announce.rpc(my_name, MODELS[_model_index])
+					_system("Ti sei cambiato.")
+				"sleep":
+					player.heal(Player.MAX_HEALTH)
+					if not _online_now():
+						daynight.hour = 8.0
+						_system("Hai dormito fino alle 8 di mattina. Vita piena.")
+					else:
+						_system("Ti sei riposato: vita piena (in rete l'ora non cambia).")
+					save_bank()
+			return true
+		return false
+	var d := homes.door_near(p)
+	if not d.is_empty():
+		_home_ui.open_door(String(d["id"]))
+		return true
+	return false
+
+
+func _home_hint() -> String:
+	if homes == null or player.mounted():
+		return ""
+	var p := player.global_position
+	if homes.inside != "":
+		if homes.exit_near(p):
+			return "E / croce su: esci" + ("" if homes.visiting else " · O arreda")
+		var u := homes.usable_near(p)
+		if not u.is_empty() and not homes.visiting:
+			return {"safe": "E: apri la cassaforte", "wardrobe": "E: cambiati (armadio)", "sleep": "E: dormi"}[u[1]]
+		return "" if homes.visiting else "O: arreda la casa"
+	var d := homes.door_near(p)
+	if not d.is_empty():
+		return "E / croce su: %s %s" % ["casa tua ·" if homes.owned.has(d["id"]) else "in vendita ·", d["name"]]
+	return ""
+
+
+# --- Banche -----------------------------------------------------------------------------------------
+
+
+var _hm_step := 0
+
+
+## Prova delle case (--hometest=tipo): elenca le case, compra la prima di quel tipo, entra, arreda, foto.
+func _home_test() -> void:
+	var dir := String(_args.get("shotdir", "."))
+	if _hm_step == 0 and _time > 2.0:
+		_hm_step = 1
+		var counts := {}
+		for pp: Dictionary in homes.properties:
+			counts[pp["type"]] = int(counts.get(pp["type"], 0)) + 1
+		print("case: %d %s" % [homes.properties.size(), counts])
+		for pp: Dictionary in homes.properties:
+			if pp["type"] == String(_args["hometest"]):
+				player.money = 500000
+				print(homes.buy(String(pp["id"])))
+				player.teleport((pp["door"] as Vector3) + Vector3(0, 0.5, 0))
+				_args["home_id"] = pp["id"]
+				break
+	elif _hm_step == 1 and _time > 3.5:
+		_hm_step = 2
+		get_viewport().get_texture().get_image().save_png(dir + "/door.png")
+		homes.enter(String(_args["home_id"]))
+	elif _hm_step == 2 and _time > 6.0:
+		_hm_step = 3
+		get_viewport().get_texture().get_image().save_png(dir + "/inside.png")
+		_home_ui.open_edit()
+		var s := homes.room_size()
+		for e: Array in [["divano", s.x * 0.5, 3.2, PI], ["tv", s.x * 0.5, 1.0, 0.0], ["tappeto", s.x * 0.5, 2.2, 0.0], ["cassaforte", 0.6, s.y - 1.6, PI / 2],
+				["armadio", s.x - 0.5, 2.2, -PI / 2], ["pianta", 0.6, 0.8, 0.0], ["biliardo", s.x * 0.3, s.y * 0.55, PI / 2], ["libreria", 0.3, 3.5, PI / 2]]:
+			homes.place(e)
+	elif _hm_step == 3 and _time > 8.0:
+		_hm_step = 4
+		get_viewport().get_texture().get_image().save_png(dir + "/edit.png")
+		_home_ui.close_ui()
+		print("mobili: %d, valore € %d, prezzo di vendita € %d" % [homes.items().size(), homes.furniture_value(String(_args["home_id"])), homes.sell_price(String(_args["home_id"]))])
+
+
+var _mt_step := 0
+
+
+## Prova di una missione (--mission=festa|crediti): la avvia e la porta avanti a forza, stampando le fasi.
+func _mission_test() -> void:
+	var id := String(_args["mission"])
+	if _frame % 60 == 0 and missions.active != "":
+		print("missione %s: fase %d, obiettivo «%s», soldi %d, stelle %d" % [missions.active, missions.stage, missions._objective.text, player.money, my_stars()])
+	if _mt_step == 0 and _time > 2.0:
+		_mt_step = 1
+		missions.start(id)
+	elif _mt_step == 1 and _time > 5.0:
+		_mt_step = 2
+		var who: Gunman = missions._data.get("target", missions._data.get("debtor"))
+		player.teleport(who.global_position + Vector3(3, 0.5, 0))
+		who.take_damage(999.0 if id == "festa" else 30.0, _my_peer(), who.global_position)
+	elif _mt_step == 2 and _time > 8.0:
+		_mt_step = 3
+		if id == "festa":
+			police.clear(_my_peer())
+		else:
+			player.teleport((missions._data["case"] as Node3D).global_position + Vector3(0, 0.3, 0))
+	elif _mt_step == 3 and _time > 10.0 and id == "crediti":
+		_mt_step = 4
+		player.teleport(missions._contact_pos("Zio Franco") + Vector3(1, 0.5, 0))
+	if missions.active == "" and _mt_step >= 3 and not _args.has("mt_done"):
+		_args["mt_done"] = true
+		print("missione finita: completate %s, soldi %d, fama %d, titolo «%s»" % [missions.done, player.money, fame, missions._title.text])
+
+
+var _bt_step := 0
+
+
+## Prova della banca n (--banktest=n): atrio, direttore in ostaggio, caveau aperto, due sacchi presi.
+func _bank_test() -> void:
+	var b: Dictionary = banks.banks[int(_args["banktest"]) % banks.banks.size()]
+	var room: Dictionary = b["room"]
+	var n: Vector3 = room["n"]
+	if _frame % 120 == 0:
+		print("prova banca t=%d: soldi %d, stelle %d, caveau %s, sacchi %d, allarme %s, vigilanti %d" % [int(_time), player.money, my_stars(), b["st"]["open"],
+			Banks._count_bits(int(b["st"]["bags"])), float(b["st"]["alarm"]) > Time.get_unix_time_from_system(), (b["guards"] as Array).size()])
+	if _bt_step == 0 and _time > 2.0:
+		_bt_step = 1
+		var at: Vector3 = (room["counter_front"] as Vector3) - n * 2.5
+		player.teleport(at + Vector3(0, 0.3, 0))
+		player.cam_yaw = atan2(n.x, n.z) + PI
+		player.cam_pitch = -0.12
+		player.set_zoom(4.0)
+	elif _bt_step == 1 and _time > 7.0:
+		_bt_step = 2
+		for ck: Node in b["staff"]:
+			if is_instance_valid(ck) and ck.has_meta("director"):
+				(ck as Pedestrians.Clerk).rob(_my_peer())
+	elif _bt_step == 2 and _time > 15.0:
+		_bt_step = 3
+		var spot: Vector3 = room["vault_spots"][0]
+		player.teleport(spot - n * 0.6 + Vector3(0, 0.3, 0))
+		bank_request("bag", [banks.banks.find(b), 0])
+		bank_request("bag", [banks.banks.find(b), 1])
+		player.cam_yaw = atan2(n.x, n.z) + PI + 0.6
+
+
+func save_bank() -> void:
+	_save_settings()
+
+
+## E in banca: bancomat, sportello (con l'impiegato al suo posto), sacco del caveau, trapano. true se ha fatto qualcosa.
+func _bank_interact() -> bool:
+	if banks == null:
+		return false
+	var p := player.global_position
+	if _drill_bank >= 0:
+		_drill_bank = -1
+		_system("Hai smesso di trapanare.")
+		return true
+	var bag := banks.bag_near(p)
+	if not bag.is_empty():
+		bank_request("bag", bag)
+		return true
+	var atm := banks.atm_near(p)
+	if atm >= 0:
+		_open_bank_ui("Bancomat · " + String(banks.banks[atm]["room"]["brand"]))
+		return true
+	var shop := shops.shop_here()
+	if not shop.is_empty() and shop["kind"] == "bank":
+		_open_bank_ui("Sportello · " + String(shop["name"]).replace("Banca · ", ""))
+		return true
+	var v := banks.vault_near(p)
+	if v >= 0:
+		_drill_bank = v
+		_drill_t = 0.0
+		bank_request("drill_start", [v])
+		_system("Trapano acceso sulla porta del caveau: servono %d secondi. È scattato l'allarme!" % int(Banks.DRILL_TIME))
+		return true
+	return false
+
+
+func _bank_hint() -> String:
+	if banks == null or player.mounted():
+		return ""
+	var p := player.global_position
+	if not banks.bag_near(p).is_empty():
+		return "E / croce su: prendi il sacco di contanti"
+	if banks.atm_near(p) >= 0:
+		return "E / croce su: bancomat (versa e preleva)"
+	var shop := shops.shop_here()
+	if not shop.is_empty() and shop["kind"] == "bank":
+		return "E / croce su: sportello (conto corrente) · punta un'arma all'impiegato per rapinarlo"
+	if banks.vault_near(p) >= 0:
+		return "E / croce su: trapana la porta del caveau (%d s) · o fallala saltare con la TNT" % int(Banks.DRILL_TIME)
+	return ""
+
+
+func _drill_tick(delta: float) -> void:
+	if _drill_bank < 0:
+		return
+	var door: Vector3 = banks.banks[_drill_bank]["room"]["vault_door"]
+	if player.dead or player.mounted() or player.global_position.distance_to(door) > 2.8 or banks.banks[_drill_bank]["st"]["open"]:
+		_drill_bank = -1
+		return
+	_drill_t += delta
+	if int(_drill_t * 4.0) % 2 == 0 and _frame % 6 == 0:
+		Sfx.play3d("impact", door + Vector3(0, 1.1, 0), -6.0, 0.6)
+	if _drill_t >= Banks.DRILL_TIME:
+		bank_request("drill_done", [_drill_bank])
+		_drill_bank = -1
+
+
+func _open_bank_ui(where: String) -> void:
+	player.input_enabled = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_bank_ui.open(where)
+
+
+func bank_request(action: String, args: Array) -> void:
+	if simulate:
+		banks.request(_my_peer(), action, args)
+	elif _online_now():
+		net_bank_request.rpc_id(1, action, args)
+
+
+func bank_sync(i: int, st: Array) -> void:
+	if _online_now():
+		net_bank.rpc(i, st)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func net_bank_request(action: String, args: Array) -> void:
+	if simulate and banks:
+		banks.request(multiplayer.get_remote_sender_id(), action, args)
+
+
+@rpc("authority", "call_remote", "reliable")
+func net_bank(i: int, st: Array) -> void:
+	if banks:
+		banks.set_state(i, st)
+
+
+# --- Clan e fama criminale -------------------------------------------------------------------------
+
+
+func online() -> bool:
+	return _online_now()
+
+
+func my_stars() -> int:
+	return int(_my_wanted()[0])
+
+
+func name_of(peer: int) -> String:
+	if peer == _my_peer():
+		return my_name
+	return String(_names.get(peer, ""))
+
+
+func peer_of(n: String) -> int:
+	if n == my_name:
+		return _my_peer()
+	for id: int in _names:
+		if String(_names[id]) == n:
+			return id
+	return 0
+
+
+## Fama a un giocatore (su questo PC o su un altro): la tiene il suo PC, che la salva.
+func give_fame(peer: int, n: int) -> void:
+	if peer == _my_peer():
+		add_fame(n)
+	elif _online_now() and peer > 0:
+		net_fame_add.rpc_id(peer, n)
+
+
+var _fame_send_t := 0.0
+var _fame_dirty := false
+
+
+func add_fame(n: int) -> void:
+	if n == 0:
+		return
+	var before := Crime.level_index(fame)
+	fame = maxi(0, fame + n)
+	_fame_dirty = true
+	_fame_send_t = 2.0
+	if Crime.level_index(fame) > before:
+		_system_clan("Fama criminale: ora sei %s (%d)." % [Crime.level_name(fame), fame])
+		Sfx.play2d("win", -6.0)
+		if fame >= Crime.FOUND_FAME and before < Crime.level_index(Crime.FOUND_FAME):
+			_system_clan("Ora puoi fondare un clan tuo (U).")
+
+
+func _fame_tick(delta: float) -> void:
+	if not _fame_dirty:
+		return
+	_fame_send_t -= delta
+	if _fame_send_t <= 0.0:
+		_fame_dirty = false
+		clan_request("fame", [fame])
+		_save_settings()
+
+
+func _system_clan(text: String) -> void:
+	_add_chat_line(text, Color(1.0, 0.62, 0.35))
+	print("clan: ", text)
+
+
+func clan_msg(peer: int, text: String) -> void:
+	if peer == _my_peer():
+		_system_clan(text)
+	elif _online_now() and peer > 0:
+		net_clan_msg.rpc_id(peer, text)
+
+
+func clan_reply(peer: int, ok: bool, text: String, charge: int) -> void:
+	if peer == _my_peer():
+		_on_clan_reply(ok, text, charge)
+	elif _online_now() and peer > 0:
+		net_clan_reply.rpc_id(peer, ok, text, charge)
+
+
+func clan_broadcast(text: String) -> void:
+	_system_clan(text)
+	if _online_now():
+		net_clan_msg.rpc(text)
+
+
+func clan_sync(json: String) -> void:
+	if _online_now():
+		net_clan_state.rpc(json)
+
+
+## Azione di un giocatore sui clan: la decide chi ospita.
+func clan_request(action: String, args: Array) -> void:
+	if clans == null:
+		return
+	if simulate:
+		clans.request(_my_peer(), action, args)
+	elif _online_now():
+		net_clan_request.rpc_id(1, action, args)
+
+
+func _on_clan_reply(ok: bool, text: String, charge: int) -> void:
+	if ok and charge > 0 and not creative:
+		player.money = maxi(0, player.money - charge)
+	if _clan_ui and _clan_ui.visible:
+		_clan_ui.show_reply(text)
+	else:
+		_system_clan(text)
+	if ok:
+		Sfx.play2d("coin", -8.0)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func net_clan_request(action: String, args: Array) -> void:
+	if simulate and clans:
+		clans.request(multiplayer.get_remote_sender_id(), action, args)
+
+
+@rpc("authority", "call_remote", "reliable")
+func net_clan_state(json: String) -> void:
+	if clans:
+		clans.apply_state(json)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func net_clan_reply(ok: bool, text: String, charge: int) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		_on_clan_reply(ok, text, charge)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func net_clan_msg(text: String) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		_system_clan(text)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func net_fame_add(n: int) -> void:
+	if multiplayer.get_remote_sender_id() == 1:
+		add_fame(clampi(n, -1000, 1000))
+
+
+var _ct_step := 0
+
+
+## Prova dei clan: spaccio nella zona di un clan (rabbia, avviso, squadra), fondazione di un clan, spacciatore
+## assunto, rinforzi. Stampa cosa succede.
+func _clan_test() -> void:
+	var soldiers := clans.get_children().filter(func(n: Node) -> bool: return n is Clans.Soldier)
+	if _frame % 120 == 0:
+		var roles := {}
+		for s: Clans.Soldier in soldiers:
+			roles[s.role] = int(roles.get(s.role, 0)) + 1
+		var mine := clans.clan_of(my_name)
+		print("prova clan t=%d: uomini %s, rabbia %s, mio clan %d, fama %d, soldi %d, spacciatori %d, stelle %d" % [int(_time), roles, clans.rage, mine, fame, player.money, clans.pushers.size(), my_stars()])
+	if _ct_step == 0 and _time > 3.0:
+		_ct_step = 1
+		fame = 800
+		player.money = 60000
+		player.drugs = {"erba": 20, "cocaina": 10}
+		clan_request("fame", [fame])
+		var p := player.global_position
+		for k in 6:
+			clans.on_sale(_my_peer(), "erba", 30, p)  # 6 vendite nella zona di un clan: rabbia 48
+	elif _ct_step == 1 and _time > 14.0:
+		_ct_step = 2
+		clan_request("found", ["I Testardi"])
+	elif _ct_step == 2 and _time > 16.0:
+		_ct_step = 3
+		player.drugs["cocaina"] = 0
+		clan_request("hire", ["cocaina", 10])
+		_args["wanted"] = "3"
+	elif _ct_step == 3 and _time > 18.0:
+		_ct_step = 4
+		clan_request("backup", [])
+
+
+var _ct2_step := 0
+
+
+## Seconda prova dei clan: si entra nel Clan di Prati, lavoro dal boss, spacciatore nella propria zona, uomini
+## di un clan rivale uccisi nella loro zona (presa sulla zona che cresce).
+func _clan_test2() -> void:
+	if _frame % 180 == 0:
+		var m := clans.clan_of(my_name)
+		var infl: Dictionary = clans.zones[4]["infl"] if clans.zones.size() > 4 else {}
+		print("prova2 t=%d: clan %d (%s), soldi %d, fama %d, spacciatori %s, lavoro '%s', presa su Parioli %s, padrone %d" % [int(_time), m, clans.rank_name(my_name), player.money, fame,
+			clans.pushers.map(func(p: Dictionary) -> String: return "%s:%d/%d" % [p["drug"], int(p["stock"]), int(p["earned"])]), clans.mission_text(my_name), infl, clans.zone_owner(4)])
+	if _ct2_step == 0 and _time > 3.0:
+		_ct2_step = 1
+		fame = 400
+		player.money = 50000
+		player.drugs = {"erba": 20}
+		clan_request("fame", [fame])
+		clan_request("join", [3])
+	elif _ct2_step == 1 and _time > 5.0:
+		_ct2_step = 2
+		clan_request("mission", [])
+		var z6: Vector2 = Crime.ZONES[6]["c"]
+		player.teleport(Vector3(z6.x, city.surface_at(z6.x, z6.y) + 1.0, z6.y))
+	elif _ct2_step == 2 and _time > 7.0:
+		_ct2_step = 3
+		player.drugs["erba"] = 5
+		clan_request("hire", ["erba", 15])
+	elif _ct2_step == 3 and _time > 9.0:
+		_ct2_step = 4
+		# 6 uomini dei Pariolini uccisi a Parioli.
+		var z4: Vector2 = Crime.ZONES[4]["c"]
+		for k in 6:
+			var s: Clans.Soldier = clans._spawn_soldier(2, Vector3(z4.x + k * 2.0, city.surface_at(z4.x, z4.y) + 0.3, z4.y), "squad", null)
+			s.take_damage(999.0, _my_peer(), s.global_position)
+
+
+func _open_clan_ui(boss_clan: int) -> void:
+	player.input_enabled = false
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	if boss_clan >= 0:
+		_clan_ui.open_boss(boss_clan)
+	else:
+		_clan_ui.open_panel()
+
+
+## Sconto dallo spacciatore se è nella zona del tuo clan.
+func _drug_discount(pos: Vector3) -> float:
+	var mine := clans.clan_of(my_name)
+	return 0.8 if mine >= 0 and clans.zone_owner(Crime.zone_of(Vector2(pos.x, pos.z))) == mine else 1.0
+
+
+var _zone_polys := []
+
+
+## Zone per la mappa: [poligono, colore del clan che la tiene, nome].
+func _zones_for_map() -> Array:
+	if _zone_polys.is_empty():
+		for i in Crime.ZONES.size():
+			_zone_polys.append(Crime.zone_polygon(i, city.bbox))
+	var out := []
+	for i in Crime.ZONES.size():
+		var owner := clans.zone_owner(i)
+		out.append([_zone_polys[i], clans.color_of(owner) if owner >= 0 else Color(0.5, 0.5, 0.5), String(Crime.ZONES[i]["name"])])
+	return out
+
+
+func _update_zone_label() -> void:
+	if clans == null or clans.zones.is_empty():
+		return
+	var z := Crime.zone_of(Vector2(player.global_position.x, player.global_position.z))
+	var owner := clans.zone_owner(z)
+	var c := clans.clan(owner)
+	var t := String(Crime.ZONES[z]["name"]) + (" · territorio di " + String(c["name"]) if not c.is_empty() else " · terra di nessuno")
+	if owner >= 0 and clans.clan_of(my_name) == owner:
+		t += " (il tuo clan)"
+	elif owner >= 0 and clans.hostile(owner, my_name):
+		t += " · TI CERCANO"
+	_zone_label.text = t
+	_zone_label.modulate = clans.color_of(owner).lightened(0.45) if owner >= 0 else Color(0.85, 0.85, 0.85)
+
+
+## Le etichette sopra gli altri giocatori dicono anche il loro clan.
+func _on_clans_changed() -> void:
+	for id: int in _remote:
+		var n := String(_names.get(id, ""))
+		var c := clans.clan(clans.clan_of(n))
+		(_remote[id] as Player).set_display_name(n + ("  [%s]" % c["name"] if not c.is_empty() else ""))
 
 
 # --- Rotella delle armi -----------------------------------------------------------------------

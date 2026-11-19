@@ -89,6 +89,16 @@ func report(crime: String, pos: Vector3, peer: int) -> void:
 			w = maxi(w, 1)
 		"robbery":
 			w = maxi(w, 2)
+		"snitched":
+			w = maxi(w, 2)  # uno spacciatore arrestato ha fatto il tuo nome
+		"blitz":
+			w = maxi(w, 3)  # blitz della DDA contro il tuo clan
+		"bank":
+			w = maxi(w, 4)  # allarme in banca
+		"bank_vault":
+			w = MAX_STARS  # caveau aperto
+		"hit_contract":
+			w = maxi(w, 2)
 		"theft":
 			# Furto d'auto: 1 stella solo se c'è un agente lì vicino (come in GTA).
 			for c: Node in get_tree().get_nodes_in_group("cop"):
@@ -171,6 +181,7 @@ func _physics_process(delta: float) -> void:
 	var players: Dictionary = world.players()
 	var cops := get_tree().get_nodes_in_group("cop")
 	var cars := get_children().filter(func(n: Node) -> bool: return n is PoliceCar)
+	var helis := get_children().filter(func(n: Node) -> bool: return n is PoliceHeli)
 	# Chi è ricercato e non è visto da nessun agente si calma; dopo un po' le stelle spariscono.
 	# Il controllo della vista (un raggio per agente) si fa 5 volte al secondo, non a ogni passo.
 	_sight_t += delta
@@ -193,6 +204,11 @@ func _physics_process(delta: float) -> void:
 					if (n as PoliceCar).sees(pl):
 						seen = true
 						break
+			if not seen:
+				for n: Node in helis:
+					if (n as PoliceHeli).sees(pl):
+						seen = true
+						break
 			calm[peer] = 0.0 if seen else calm_of(peer) + step
 			if seen:
 				last_seen[peer] = pl.global_position
@@ -209,6 +225,14 @@ func _physics_process(delta: float) -> void:
 			want_cars += CARS_PER_STAR[level(peer)]
 		if cars.size() < mini(want_cars, 7):
 			_dispatch_car()
+		# A 5 stelle arriva l'elicottero (uno per ricercato a 5 stelle, al massimo due).
+		var five := 0
+		for peer: int in wanted:
+			if level(peer) >= MAX_STARS:
+				five += 1
+		var flying := helis.filter(func(n: Node) -> bool: return not (n as PoliceHeli).destroyed and not (n as PoliceHeli).leaving).size()
+		if flying < mini(five, 2):
+			_dispatch_heli()
 		var alive := cops.filter(func(c: Node) -> bool: return not (c as Cop).dead).size()
 		if top >= 3 and alive < top * 2 + 2:
 			var t := _any_wanted()
@@ -226,6 +250,10 @@ func _physics_process(delta: float) -> void:
 		var d := Pedestrians.nearest(pc.global_position, anchors)
 		if (top == 0 and d > 80.0 and pc.arrived) or (pc.arrived and d > 500.0):
 			pc.queue_free()
+	for n: Node in helis:
+		var ph := n as PoliceHeli
+		if (ph.leaving and ph._leave_t > 25.0) or (ph.destroyed and ph.dead_time > 45.0):
+			ph.queue_free()
 
 
 func _any_wanted() -> Player:
@@ -259,6 +287,24 @@ func _dispatch_car() -> void:
 	pc.station = st[1]
 	add_child(pc)
 	pc.go(route)
+
+
+## Elicottero dal presidio più vicino al ricercato a 5 stelle: parte già in quota, sopra la caserma.
+func _dispatch_heli() -> void:
+	var t := _any_wanted()
+	if t == null or stations.is_empty():
+		return
+	var tp := Vector2(t.global_position.x, t.global_position.z)
+	var best: Array = stations[0]
+	for st: Array in stations:
+		if (st[0] as Vector2).distance_to(tp) < (best[0] as Vector2).distance_to(tp):
+			best = st
+	var ph := PoliceHeli.new()
+	ph.police = self
+	ph.nid = world.new_nid()
+	add_child(ph)
+	var at: Vector2 = best[0]
+	ph.global_position = Vector3(at.x, city.surface_at(at.x, at.y) + 60.0, at.y)
 
 
 ## Pattuglia a piedi già in zona: compare all'aperto vicino a dove il ricercato è stato visto l'ultima volta,
@@ -311,7 +357,7 @@ func dots() -> Array:
 		if not (c as Cop).dead:
 			out.append((c as Node3D).global_position)
 	for n: Node in get_children():
-		if n is PoliceCar:
+		if n is PoliceCar or (n is PoliceHeli and not (n as PoliceHeli).destroyed):
 			out.append((n as Node3D).global_position)
 	return out
 
@@ -639,3 +685,175 @@ class PoliceCar:
 		if with_cops:
 			for side: float in [1.0, -1.0]:
 				police.spawn_cop(global_transform * Vector3(1.8 * side, 0.2, 0.0), carabinieri)
+
+
+## Elicottero della polizia: arriva quando qualcuno ha 5 stelle. Gira sopra il ricercato a 30 m di quota con il faro
+## puntato (di notte si vede il cono di luce), lo tiene d'occhio (finché ti vede le stelle non calano) e il
+## mitragliere spara a raffiche quando ha la linea di tiro. Si può abbattere: precipita ed esplode.
+class PoliceHeli:
+	extends AnimatableBody3D
+
+	const ORBIT_R := 34.0
+	const ALT := 30.0
+	const SPEED := 24.0
+
+	var police: Police
+	var nid := 0
+	var health := 700.0
+	var destroyed := false
+	var leaving := false
+	var dead_time := 0.0
+	var _rotor: Node3D
+	var _tail: Node3D
+	var _disc: MeshInstance3D
+	var _beam: SpotLight3D
+	var _sound: AudioStreamPlayer3D
+	var _angle := 0.0
+	var _burst := 0
+	var _burst_cd := 2.5
+	var _shot_cd := 0.0
+	var _fall := Vector3.ZERO
+	var _crashed := false
+	var _leave_t := 0.0
+	var _lost_t := 0.0
+	var _rng := RandomNumberGenerator.new()
+
+	func _ready() -> void:
+		add_to_group("damageable")
+		police.world.register(nid, self)
+		collision_layer = 16
+		_rng.randomize()
+		var parts := Heli.make_model(true)
+		add_child(parts[0])
+		_rotor = parts[1]
+		_tail = parts[2]
+		_disc = parts[3]
+		var shape := BoxShape3D.new()
+		shape.size = Vector3(1.9, 1.6, 4.0)
+		var cs := CollisionShape3D.new()
+		cs.shape = shape
+		cs.position = Vector3(0, 1.25, 0.3)
+		add_child(cs)
+		_beam = PoliceHeli.make_beam(self)
+		_sound = Sfx.loop3d(self, "rotor", 8.0, 700.0)
+		_angle = _rng.randf() * TAU
+
+	## Faro sotto il muso: punta in basso (ruotato dopo verso il bersaglio).
+	static func make_beam(n: Node3D) -> SpotLight3D:
+		var l := SpotLight3D.new()
+		l.light_color = Color(1.0, 0.97, 0.9)
+		l.light_energy = 0.0
+		l.spot_range = 90.0
+		l.spot_angle = 11.0
+		l.spot_attenuation = 0.4
+		l.shadow_enabled = true
+		l.position = Vector3(0, 0.6, 1.6)
+		n.add_child(l)
+		return l
+
+	static func aim_beam(l: SpotLight3D, at: Vector3, visible_now: bool) -> void:
+		if l == null:
+			return
+		var night := DayNight.current != null and DayNight.current.is_night()
+		l.light_energy = (7.0 if night else 2.0) if visible_now else 0.0
+		if visible_now and l.global_position.distance_to(at) > 1.0:
+			l.look_at(at, Vector3.UP if absf((at - l.global_position).normalized().y) < 0.99 else Vector3.RIGHT)
+
+	func is_mine() -> bool:
+		return true
+
+	## Dall'alto vede fino a 150 m, se non ci sono palazzi in mezzo.
+	func sees(p: Player) -> bool:
+		if destroyed or leaving or p == null or p.dead:
+			return false
+		var from := global_position + Vector3(0, 0.3, 0)
+		var to := p.global_position + Vector3(0, 1.3, 0)
+		if from.distance_to(to) > 150.0:
+			return false
+		var q := PhysicsRayQueryParameters3D.create(from, to, 1)
+		return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
+
+	func take_damage(amount: float, from_peer: int, at: Vector3) -> void:
+		if destroyed or from_peer < 0:
+			return
+		health -= amount
+		police.report("assault", at, from_peer)
+		if health <= 0.0:
+			destroyed = true
+			_fall = Vector3(_rng.randf_range(-4, 4), 0, _rng.randf_range(-4, 4))
+			police.report("cop_kill", at, from_peer)
+			police.combat.explode(global_position + Vector3(0, 1.0, 0), "auto", -1, false)
+			var burnt := StandardMaterial3D.new()
+			burnt.albedo_color = Color(0.06, 0.055, 0.05)
+			for mi: MeshInstance3D in find_children("*", "MeshInstance3D", true, false):
+				mi.material_override = burnt
+			if _beam:
+				_beam.queue_free()
+				_beam = null
+
+	func _physics_process(delta: float) -> void:
+		Heli.spin(_rotor, _tail, _disc, 0.0 if _crashed else (0.6 if destroyed else 1.0), delta)
+		if destroyed:
+			dead_time += delta
+			if not _crashed:
+				# Precipita girando su sé stesso finché non tocca terra, poi esplode.
+				_fall.y -= 14.0 * delta
+				var p := global_position + _fall * delta
+				var ground := police.city.surface_at(p.x, p.z)
+				if p.y <= ground + 0.3:
+					p.y = ground + 0.3
+					_crashed = true
+					if _sound:
+						_sound.queue_free()
+						_sound = null
+					police.combat.explode(p + Vector3(0, 1.0, 0), "auto", -1, false)
+				global_transform = Transform3D(global_basis.rotated(Vector3.UP, 4.0 * delta), p)
+			return
+		var target := police.target_near(global_position)
+		if target == null or police.level(police._peer_of(target)) < Police.MAX_STARS:
+			_lost_t += delta
+			if _lost_t > 5.0:
+				leaving = true  # nessuno più a 5 stelle da un po': torna alla base
+		else:
+			_lost_t = 0.0
+		if not leaving and target == null:
+			return
+		if leaving:
+			_leave_t += delta
+			global_position += Vector3(0, 6.0, 0) * delta + global_basis.z * SPEED * delta
+			PoliceHeli.aim_beam(_beam, global_position, false)
+			return
+		var goal := police.goal_for(target)
+		var ground := maxf(police.city.surface_at(goal.x, goal.z), goal.y)
+		_angle += delta * 0.22
+		var want := Vector3(goal.x + cos(_angle) * ORBIT_R, ground + ALT, goal.z + sin(_angle) * ORBIT_R)
+		var to := want - global_position
+		var step := minf(to.length(), SPEED * delta)
+		var vel := to.normalized() * step / maxf(delta, 0.0001) if to.length() > 0.01 else Vector3.ZERO
+		var pos := global_position + (to.normalized() * step if to.length() > 0.01 else Vector3.ZERO)
+		# Muso verso il ricercato, inclinato un po' nel senso di marcia (posizione e assetto insieme: sono un
+		# corpo animato, impostarli separatamente rimette la posizione vecchia).
+		var look := goal - pos
+		var yaw := atan2(look.x, look.z)
+		var tilt := clampf(vel.length() / SPEED, 0.0, 1.0) * 0.15
+		var b := Basis(Vector3.UP, yaw) * Basis(Vector3.RIGHT, tilt)
+		global_transform = Transform3D(Basis(global_basis.get_rotation_quaternion().slerp(b.get_rotation_quaternion(), 1.0 - exp(-3.0 * delta))), pos)
+		var seen := sees(target)
+		if seen:
+			police.spotted(target)
+		PoliceHeli.aim_beam(_beam, target.global_position, true)
+		# Raffiche del mitragliere (dal portellone), solo con il bersaglio in vista e vicino.
+		_burst_cd -= delta
+		_shot_cd -= delta
+		if seen and global_position.distance_to(target.global_position) < 110.0:
+			if _burst <= 0 and _burst_cd <= 0.0:
+				_burst = 7
+				_burst_cd = 3.2
+			if _burst > 0 and _shot_cd <= 0.0:
+				_burst -= 1
+				_shot_cd = 0.11
+				var muzzle := global_transform * Vector3(1.0, 0.8, 0.5)
+				var aim := target.global_position + Vector3(0, 1.1, 0) + target.velocity * 0.25
+				var dir := (aim - muzzle).normalized()
+				dir = (dir + Vector3(_rng.randf_range(-1, 1), _rng.randf_range(-1, 1), _rng.randf_range(-1, 1)) * 0.035).normalized()
+				police.combat.shoot(self, "mitragliatrice", muzzle, dir, muzzle)

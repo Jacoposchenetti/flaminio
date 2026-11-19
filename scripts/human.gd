@@ -54,6 +54,16 @@ const UNIFORMS := {
 	"cop_m": ["m", "olivastra", "Buzzed", "nero", false, Color(0.55, 0.68, 0.86), Color(0.08, 0.1, 0.18), Color(0.05, 0.05, 0.05), true, false, false, false],
 	"cop_f": ["f", "chiara", "Buns", "castano", false, Color(0.55, 0.68, 0.86), Color(0.08, 0.1, 0.18), Color(0.05, 0.05, 0.05), true, false, false, false],
 	"cc_m": ["m", "olivastra", "Buzzed", "nero", false, Color(0.07, 0.07, 0.1), Color(0.05, 0.05, 0.07), Color(0.03, 0.03, 0.03), true, false, false, false],
+	# Uomini dei clan: giubbotto col colore del clan, jeans scuri; i boss in completo.
+	"gang_red": ["m", "olivastra", "Buzzed", "nero", true, Color(0.55, 0.06, 0.05), Color(0.1, 0.1, 0.12), Color(0.9, 0.9, 0.9), false, false, false, false],
+	"gang_purple": ["m", "chiara", "SimpleParted", "castano", true, Color(0.38, 0.12, 0.5), Color(0.12, 0.12, 0.14), Color(0.1, 0.1, 0.1), false, false, false, false],
+	"gang_blue": ["m", "rosea", "SimpleParted", "biondo", false, Color(0.1, 0.25, 0.6), Color(0.75, 0.7, 0.6), Color(0.35, 0.22, 0.12), true, false, true, false],
+	"gang_orange": ["m", "ambrata", "Buzzed", "nero", true, Color(0.75, 0.38, 0.06), Color(0.15, 0.15, 0.18), Color(0.95, 0.95, 0.95), false, false, false, false],
+	"gang_black": ["m", "scura", "Buzzed", "nero", true, Color(0.06, 0.06, 0.07), Color(0.08, 0.08, 0.1), Color(0.05, 0.05, 0.05), false, false, false, false],
+	# Vigilanza privata delle banche (camicia grigia, pantaloni scuri) e direttore di filiale.
+	"guard": ["m", "olivastra", "Buzzed", "nero", false, Color(0.32, 0.34, 0.38), Color(0.1, 0.11, 0.14), Color(0.04, 0.04, 0.04), true, false, false, false],
+	"banker": ["m", "chiara", "SimpleParted", "grigio", false, Color(0.12, 0.16, 0.28), Color(0.12, 0.13, 0.18), Color(0.06, 0.05, 0.04), false, false, true, false],
+	"boss": ["m", "olivastra", "SimpleParted", "grigio", true, Color(0.16, 0.16, 0.18), Color(0.14, 0.14, 0.16), Color(0.05, 0.04, 0.03), true, false, false, false],
 }
 
 static var _anim_lib: AnimationLibrary

@@ -16,6 +16,8 @@ var _shop: Dictionary = {}
 var _shop_items: Array = []
 var _shops: Shops
 var wanted_info: Callable  # func() -> [stelle, secondi senza essere visto]
+var clock: Callable  # func() -> "hh:mm" (ora del gioco)
+var fame_info: Callable  # func() -> fama criminale
 
 
 func setup(p: Player, shops: Shops) -> void:
@@ -46,7 +48,13 @@ func _draw() -> void:
 	draw_rect(Rect2(x0, y0, 270 * player.health / Player.MAX_HEALTH, 10), Color(0.3, 0.8, 0.35) if player.health > 30 else Color(0.9, 0.2, 0.15))
 	draw_rect(Rect2(x0, y0 + 13, 270, 6), Color(0, 0, 0, 0.55))
 	draw_rect(Rect2(x0, y0 + 13, 270 * player.armor / Player.MAX_ARMOR, 6), Color(0.3, 0.6, 1.0))
-	_text(Vector2(w - 20, y0 + 52), "€ %s" % _thousands(player.money), 30, Color(0.55, 0.9, 0.5), HORIZONTAL_ALIGNMENT_RIGHT)
+	if player.has_jetpack and player.jet_worn:
+		# Carburante del jetpack (arancione), sotto l'armatura.
+		draw_rect(Rect2(x0, y0 + 22, 270, 5), Color(0, 0, 0, 0.55))
+		draw_rect(Rect2(x0, y0 + 22, 270 * (1.0 if player.creative else player.jet_fuel), 5), Color(1.0, 0.55, 0.15))
+	_text(Vector2(w - 20, y0 + 52), "€ ∞" if player.creative else "€ %s" % _thousands(player.money), 30, Color(0.55, 0.9, 0.5), HORIZONTAL_ALIGNMENT_RIGHT)
+	if clock.is_valid():
+		_text(Vector2(x0, y0 + 50), String(clock.call()), 24, Color(0.92, 0.92, 1.0))
 	var wi_star: Array = wanted_info.call() if wanted_info.is_valid() else [0, 0.0]
 	if int(wi_star[0]) > 0:
 		# Stelle del ricercato: lampeggiano quando gli agenti non ti vedono.
@@ -61,12 +69,19 @@ func _draw() -> void:
 	if rt != "":
 		_text(Vector2(w - 20, y0 + 110), rt, 20, Color(1, 0.9, 0.6), HORIZONTAL_ALIGNMENT_RIGHT)
 	if player.stash > 0:
-		_text(Vector2(w - 20, y0 + 190), "Pacchetti: %d" % player.stash, 20, Color(0.8, 0.6, 1.0), HORIZONTAL_ALIGNMENT_RIGHT)
+		var parts := []
+		for id: String in Crime.DRUG_ORDER:
+			if int(player.drugs.get(id, 0)) > 0:
+				parts.append("%s %d" % [Crime.DRUGS[id]["name"], int(player.drugs[id])])
+		_text(Vector2(w - 20, y0 + 190), " · ".join(parts), 18, Color(0.8, 0.6, 1.0), HORIZONTAL_ALIGNMENT_RIGHT)
+	if fame_info.is_valid():
+		var f: int = fame_info.call()
+		_text(Vector2(w - 20, y0 + 214), "Fama %d · %s" % [f, Crime.level_name(f)], 17, Color(1.0, 0.75, 0.35), HORIZONTAL_ALIGNMENT_RIGHT)
 	# Mirino.
 	var c := size * 0.5
 	if player.aiming and player.weapon == "cecchino":
 		_scope(c)
-	elif player.aiming or (not player.dead and (
+	elif player.vehicle is Heli or player.aiming or (not player.dead and (
 			(wi["kind"] != "melee" and player.vehicle == null) or String(wi["kind"]) in ["gun", "rocket"])):
 		var r := 10.0 if player.aiming else 6.0
 		var col := Color(1, 1, 1, 0.9 if player.aiming else 0.45)

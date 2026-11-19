@@ -12,7 +12,7 @@ extends Node3D
 const RADIUS := 380.0
 const FIELDS := 9
 const PER_PART := 30
-enum Kind { PERSON, COP, CAR, POLICE_CAR, CASH, AMMO }
+enum Kind { PERSON, COP, CAR, POLICE_CAR, CASH, AMMO, POLICE_HELI, GANG }
 const ANIMS := ["idle", "stroll", "walk", "sprint", "talk", "crouch", "aim", "shoot", "death", "hit", "crouch_walk", "jump", "fall"]
 
 var world: Node  # main.gd
@@ -33,7 +33,7 @@ static func looks() -> Array:
 
 
 ## Restituisce i pezzi (PackedFloat32Array) con gli oggetti vicini a center.
-func build_for(center: Vector3, peds: Pedestrians, traffic: Traffic, police: Police) -> Array:
+func build_for(center: Vector3, peds: Pedestrians, traffic: Traffic, police: Police, clans: Clans = null, banks: Banks = null) -> Array:
 	var out := PackedFloat32Array()
 	var add := func(n: Node3D, nid: int, kind: int, look: int, yaw: float, anim: String, flags: int) -> void:
 		var p := n.global_position
@@ -61,6 +61,21 @@ func build_for(center: Vector3, peds: Pedestrians, traffic: Traffic, police: Pol
 		elif n is Police.PoliceCar:
 			var pc := n as Police.PoliceCar
 			add.call(pc, pc.nid, Kind.POLICE_CAR, 1 if pc.carabinieri else 0, pc.global_rotation.y, "idle", 1 if pc.destroyed else 0)
+		elif n is Police.PoliceHeli:
+			var ph := n as Police.PoliceHeli
+			add.call(ph, ph.nid, Kind.POLICE_HELI, 0, ph.global_rotation.y, "idle", 1 if ph.destroyed else 0)
+	if clans:
+		for n: Node in clans.get_children():
+			if n is Clans.Soldier:
+				var s := n as Clans.Soldier
+				# Segnali: 1 morto, 2 mitragliatrice, 16 boss, 32 disarmato; il clan nei bit dall'8 in su.
+				var gf := (1 if s.dead else 0) | (2 if s.weapon == "mitragliatrice" else 0) | (16 if s.role == "boss" else 0) | (32 if s.weapon == "" else 0) | (s.clan_id << 8)
+				add.call(s, s.nid, Kind.GANG, looks().find(s.preset), s.rotation.y + s.human().rotation.y, s.net_anim, gf)
+	if banks:
+		for n: Node in banks.get_children():
+			if n is Gunman:
+				var g := n as Gunman
+				add.call(g, g.nid, Kind.GANG, looks().find(g.preset), g.rotation.y + g.human().rotation.y, g.net_anim, (1 if g.dead else 0) | (2 if g.weapon == "mitragliatrice" else 0))
 	var parts := []
 	var step := PER_PART * FIELDS
 	for i in range(0, maxi(out.size(), 1), step):
@@ -124,20 +139,26 @@ func police_dots() -> Array:
 
 func _create(nid: int, kind: int, look: int, flags: int) -> Node:
 	match kind:
-		Kind.PERSON, Kind.COP:
+		Kind.PERSON, Kind.COP, Kind.GANG:
 			var p := PersonPuppet.new()
 			p.sync = self
 			p.nid = nid
 			p.preset = looks()[clampi(look, 0, looks().size() - 1)]
-			p.gun = ("mitragliatrice" if flags & 2 else "pistola") if kind == Kind.COP else ""
+			p.gun = ("mitragliatrice" if flags & 2 else "pistola") if kind == Kind.COP or (kind == Kind.GANG and flags & 32 == 0) else ""
+			if kind == Kind.GANG:
+				p.set_meta("gang", true)
+				p.add_to_group("gang")
+				if flags & 16:
+					p.set_meta("boss_clan", flags >> 8)
 			p.set_meta("police", kind == Kind.COP)
 			add_child(p)
 			return p
-		Kind.CAR, Kind.POLICE_CAR:
+		Kind.CAR, Kind.POLICE_CAR, Kind.POLICE_HELI:
 			var v := VehiclePuppet.new()
 			v.sync = self
 			v.nid = nid
-			v.police = kind == Kind.POLICE_CAR
+			v.heli = kind == Kind.POLICE_HELI
+			v.police = kind != Kind.CAR
 			v.look = look
 			v.set_meta("police", kind == Kind.POLICE_CAR)
 			add_child(v)
@@ -241,10 +262,30 @@ class VehiclePuppet:
 	var _lights: Array[OmniLight3D] = []
 	var _t := 0.0
 	var _last := Vector3.ZERO
+	var heli := false  # elicottero della polizia
+	var _rotor: Node3D
+	var _tail: Node3D
+	var _disc: MeshInstance3D
+	var _beam: SpotLight3D
 
 	func _ready() -> void:
 		add_to_group("damageable")
 		collision_layer = 16
+		if heli:
+			var parts := Heli.make_model(true)
+			add_child(parts[0])
+			_rotor = parts[1]
+			_tail = parts[2]
+			_disc = parts[3]
+			_beam = Police.PoliceHeli.make_beam(self)
+			_engine = Sfx.loop3d(self, "rotor", 8.0, 700.0)
+			var hshape := BoxShape3D.new()
+			hshape.size = Vector3(1.9, 1.6, 4.0)
+			var hcs := CollisionShape3D.new()
+			hcs.shape = hshape
+			hcs.position = Vector3(0, 1.25, 0.3)
+			add_child(hcs)
+			return
 		if look >= Bus.LOOK and not police:
 			# Autobus ATAC.
 			add_child(Bus.make(look - Bus.LOOK))
@@ -294,9 +335,13 @@ class VehiclePuppet:
 		_yaw = yaw
 		if flags & 1 == 1 and not _destroyed:
 			_destroyed = true
-			for n: Node in [_engine, _siren]:
+			for n: Node in [_siren, _beam]:
 				if n:
 					n.queue_free()
+			_beam = null
+			if _engine and not heli:
+				_engine.queue_free()
+				_engine = null
 			for l in _lights:
 				l.queue_free()
 			_lights.clear()
@@ -308,11 +353,25 @@ class VehiclePuppet:
 	func _process(delta: float) -> void:
 		_t += delta
 		Police.PoliceCar.blink(_lights, _t)
+		if heli:
+			Heli.spin(_rotor, _tail, _disc, 0.6 if _destroyed else 1.0, delta)
+			# Il faro cerca il giocatore più vicino (quello inseguito, di solito).
+			var best: Node3D = null
+			var bd := 130.0
+			var ps: Dictionary = sync.world.players()
+			for peer: int in ps:
+				var pl: Node3D = ps[peer]
+				var d := pl.global_position.distance_to(global_position)
+				if d < bd:
+					bd = d
+					best = pl
+			if _beam and not _destroyed:
+				Police.PoliceHeli.aim_beam(_beam, best.global_position if best else global_position + Vector3(0, -30, 0), best != null)
 		var k := 1.0 - exp(-10.0 * delta)
 		var p := _target if global_position.distance_to(_target) > 20.0 else global_position.lerp(_target, k)
 		var q := Basis(Vector3.UP, _yaw).get_rotation_quaternion()
 		global_transform = Transform3D(Basis(global_basis.get_rotation_quaternion().slerp(q, k)), p)
-		if _engine and delta > 0.0:
+		if _engine and delta > 0.0 and not heli:
 			_engine.pitch_scale = 0.5 + clampf(p.distance_to(_last) / delta / 18.0, 0.0, 1.5)
 		_last = p
 

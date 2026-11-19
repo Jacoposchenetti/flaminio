@@ -25,12 +25,18 @@ const CATS := {
 	"pharmacy": [Color(0.1, 0.68, 0.3), "+"],
 	"dealer": [Color(0.6, 0.25, 0.9), "$"],
 	"enter": [Color(0.85, 0.65, 0.1), "E"],
+	"heli": [Color(0.2, 0.55, 0.95), "H"],
+	"boss": [Color(0.1, 0.1, 0.1), "☠"],
+	"banca": [Color(0.85, 0.65, 0.1), "€"],
+	"mission": [Color(0.95, 0.8, 0.1), "M"],
+	"casa": [Color(0.2, 0.7, 0.35), "C"],
+	"casa_mia": [Color(0.2, 0.45, 0.95), "C"],
 }
 ## Luoghi dove si fa qualcosa: segni grandi, colorati, col nome sempre scritto. Gli altri sono solo di riferimento.
-const USEFUL := ["gun", "bar", "pharmacy", "dealer", "enter"]
+const USEFUL := ["gun", "bar", "pharmacy", "dealer", "banca", "mission", "casa", "casa_mia", "enter", "heli", "boss"]
 const USEFUL_NAMES := {
 	"gun": "Armeria: armi e munizioni", "pharmacy": "Farmacia: cura", "bar": "Bar: cibo che cura, rapine",
-	"dealer": "Fornitore: spaccio", "enter": "Palazzo esplorabile",
+	"dealer": "Spacciatore: erba, fumo, cocaina, MD, LSD", "enter": "Palazzo esplorabile", "heli": "Elicottero (F per salire)", "boss": "Boss di un clan (E per parlarci)", "banca": "Banca: conto, bancomat, rapine", "mission": "Missione (E dal contatto)", "casa": "Casa in vendita", "casa_mia": "Casa tua",
 }
 
 var mini := true
@@ -38,6 +44,7 @@ var city: CityBuilder
 var player: Player
 var others: Callable  # func() -> Array di [Vector3 posizione, String nome]
 var police_dots: Callable  # func() -> Array di Vector3 (agenti e volanti)
+var zones_fn: Callable  # func() -> Array di [poligono, colore, nome] (territori dei clan)
 var extra_pois: Array = []  # luoghi del gioco (armerie, negozi, edifici esplorabili): [x, z, nome, categoria]
 var waypoint: Variant = null  # Vector2 in metri, o null
 var dest_name := ""  # nome della destinazione
@@ -203,6 +210,7 @@ func _draw() -> void:
 		var src := Rect2((vis.position - city.origin) / city.cell, vis.size / city.cell)
 		draw_texture_rect_region(_tex, Rect2(to_screen(vis.position), vis.size * scale_px), src)
 	var view := Rect2(tl, br - tl).abs().grow(40.0)
+	_draw_zones()
 	_draw_route()
 	_draw_labels(view)
 	_draw_pois(view)
@@ -220,6 +228,27 @@ func _draw() -> void:
 		for d: Vector2 in [Vector2.UP, Vector2.DOWN, Vector2.LEFT, Vector2.RIGHT]:
 			draw_line(c + d * 6.0, c + d * 16.0, Color(0.1, 0.1, 0.1, 0.8), 2.0)
 		_draw_legend()
+
+
+## Territori dei clan: velo del colore del clan e bordo; sulla mappa grande anche il nome della zona.
+func _draw_zones() -> void:
+	if not zones_fn.is_valid():
+		return
+	for zd: Array in zones_fn.call():
+		var poly: PackedVector2Array = zd[0]
+		if poly.size() < 3:
+			continue
+		var col: Color = zd[1]
+		var pts := PackedVector2Array()
+		var c := Vector2.ZERO
+		for p in poly:
+			pts.append(to_screen(p))
+			c += p
+		draw_colored_polygon(pts, Color(col.r, col.g, col.b, 0.13 if mini else 0.17))
+		pts.append(pts[0])
+		draw_polyline(pts, Color(col.r, col.g, col.b, 0.6), 2.0 if mini else 3.0)
+		if not mini:
+			_text(to_screen(c / poly.size()), String(zd[2]).to_upper(), 16, col.darkened(0.35), 0.0, Color(1, 1, 1, 0.75))
 
 
 func _text(pos: Vector2, s: String, fsize: int, col: Color, angle := 0.0, outline := Color(1, 1, 1, 0.9)) -> void:
@@ -420,7 +449,7 @@ func _draw_legend() -> void:
 	draw_rect(Rect2(16, y, 270, 30 + USEFUL.size() * 34), Color(1, 1, 1, 0.92))
 	draw_string(_font, Vector2(28, y + 22), "Dove fai qualcosa", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(0.1, 0.1, 0.1))
 	y += 34.0
-	for k: String in ["gun", "pharmacy", "bar", "dealer", "enter"]:
+	for k: String in USEFUL:
 		_pin(Vector2(36, y + 24), k, 10.0)
 		draw_string(_font, Vector2(58, y + 14), USEFUL_NAMES[k], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(0.12, 0.12, 0.12))
 		y += 34.0

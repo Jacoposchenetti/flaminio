@@ -14,17 +14,24 @@ Mouse camera · rotella zoom · tasto destro mira · sinistro spara · R ricaric
 1-7 o Tab armi · B fa esplodere la TNT · E negozio · F sali/scendi dall'auto · G clacson
 M mappa · H ritorno · C personaggio · T chat (/nome NuovoNome) · Esc o P questo menu
 In auto: W gas · S freno/retromarcia · A/D sterza · Spazio freno a mano
+Elicottero: Spazio sale · Ctrl scende · WASD vola · Shift veloce · sinistro mitra · destro o R razzi
+Jetpack: in aria tieni Spazio · Ctrl scende · J lo togli/rimetti · E davanti alla slot machine: gioca
+Clan: U pannello del clan (anche i sicari) · N chiama i rinforzi · E davanti a un boss: parlaci · K (creativa) elicottero
+Case: E al portone (compra, entra, vendi) · O in casa: arreda · H torni a casa
+Banche: E allo sportello o al bancomat · punta l'arma a impiegati o direttore · E al caveau: trapano · Missioni: E dal contatto
 
 JOYPAD (Xbox / PlayStation)
 Levetta sinistra muoviti · clic levetta sinistra (L3) corri · levetta destra camera
 A/Croce salta · B/Cerchio capriola · X/Quadrato ricarica · Y/Triangolo auto
 LT/L2 mira · RT/R2 spara · LB/L1 accovacciati · RB/R1 arma successiva · R3 clacson
 Croce: su negozio · giù TNT · sinistra ritorno · destra mappa · Start menu · Back/Share mappa
-In auto: RT gas · LT freno/retromarcia · A freno a mano"""
+In auto: RT gas · LT freno/retromarcia · A freno a mano
+Elicottero: RT sale · LT scende · LB mitra · X razzi · Jetpack: in aria tieni A"""
 
 var _box: VBoxContainer
 var _quality: Button
 var _police: Button
+var _creative: Button
 var _name: LineEdit
 var _controls: Label
 var _first: Button
@@ -74,6 +81,7 @@ func setup(player_name: String) -> void:
 	_box.add_child(ctl)
 	_quality = _button("Grafica", "quality")
 	_police = _button("Polizia", "police")
+	_creative = _button("Modalità creativa", "creative")
 	_button("Cambia personaggio", "model")
 	var name_row := HBoxContainer.new()
 	_name = LineEdit.new()
@@ -124,8 +132,10 @@ func _do_rename() -> void:
 
 
 ## Aggiorna le scritte che cambiano (grafica, polizia, nome) e il motivo per cui il gioco è o non è fermo.
-func refresh(quality_high: bool, police_on: bool, can_police: bool, player_name: String, online: bool) -> void:
+func refresh(quality_high: bool, police_on: bool, can_police: bool, player_name: String, online: bool, creative := false) -> void:
 	_quality.text = "Grafica: " + ("alta" if quality_high else "bassa (più veloce)")
+	_creative.text = "Modalità creativa: " + ("attiva (tutto infinito)" if creative else "spenta") + (" · solo da soli" if online else "")
+	_creative.disabled = online
 	_police.text = "Polizia: " + ("attiva" if police_on else "disattivata")
 	_police.disabled = not can_police
 	if not _name.has_focus():

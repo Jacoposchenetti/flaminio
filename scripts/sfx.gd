@@ -5,9 +5,9 @@ extends RefCounted
 ## cancella da solo; loop3d() restituisce un suono continuo (motori, sirene) da attaccare a un nodo.
 
 const GUN := {
-	"pistola": "pistol", "mitragliatrice": "smg", "fucile": "rifle", "pompa": "shotgun", "cecchino": "sniper",
+	"pistola": "pistol", "mitragliatrice": "smg", "fucile": "rifle", "pompa": "shotgun", "cecchino": "sniper", "heli_mg": "rifle",
 }
-const LOOPS := ["engine", "siren", "ambience"]
+const LOOPS := ["engine", "siren", "ambience", "rotor", "jet", "spin"]
 
 static var _cache := {}
 static var root: Node  # dove aggiungere i suoni (la scena principale)
