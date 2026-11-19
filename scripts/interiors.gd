@@ -30,6 +30,8 @@ static func pick(data: Dictionary, spawn: Vector3) -> Array:
 		for b: Dictionary in data["buildings"]:
 			if b.has("enter") or b.has("part") or b.has("dome") or b.get("style", "") != "":
 				continue
+			if LandmarkBuilder.in_maxxi(city_pts(b["p"])):
+				continue
 			var p: Array = b["p"]
 			var n := p.size() / 2
 			if n < 4 or n > 9:
@@ -363,3 +365,10 @@ func _box(acc: CityBuilder.Acc, center: Vector3, size: Vector3, yaw: float) -> v
 		c.append(center + bs * Vector3(h.x * (1 if i & 1 else -1), h.y * (1 if i & 2 else -1), h.z * (1 if i & 4 else -1)))
 	for f: Array in [[0, 1, 3, 2, -bs.z], [4, 5, 7, 6, bs.z], [0, 1, 5, 4, -bs.y], [2, 3, 7, 6, bs.y], [0, 2, 6, 4, -bs.x], [1, 3, 7, 5, bs.x]]:
 		_quad(acc, c[f[0]], c[f[1]], c[f[2]], c[f[3]], f[4])
+
+
+static func city_pts(flat: Array) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for i in range(0, flat.size() - 1, 2):
+		out.append(Vector2(flat[i], flat[i + 1]))
+	return out

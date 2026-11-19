@@ -136,6 +136,23 @@ pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
 - Prove: `--hour=22`, `--heli=n`, `--press=azione@t0-t1,...`, `--helishot=t:file.png`, `--wanted=5`, `--god`,
   `--slot=n --slotspin=t`, `--creative`, `--jettest`. Suoni nuovi da `tools/gen_sounds.py` (rotore, jetpack, slot).
 
+## Grafica: cielo, alberi, facciate, MAXXI
+
+- `shaders/sky.gdshader`: cielo disegnato da shader (gradiente, foschia sull'orizzonte, alone del sole, nuvole che
+  scorrono e si colorano al tramonto, stelle, luna). I colori li aggiorna `day_night.gd` due volte al secondo (la luce
+  del cielo sulla scena si ricalcola a rate, `Sky.PROCESS_MODE_INCREMENTAL`).
+- `shaders/lens_flare.gdshader`: riflessi del sole sulla lente; `DayNight._update_flare` lo nasconde se un palazzo o
+  un albero copre il sole (raggio fisico ogni 0,1 s).
+- `scripts/trees.gd` (`TreeKit`): pino domestico, platano e leccio con tronco, rami e chioma a ciuffi (piani con una
+  texture di foglie disegnata all'avvio e salvata in `user://foglie_v1.png`); tre livelli di dettaglio (entro
+  `TREE_NEAR`, fino a `NEAR_RANGE`, oltre). Le chiome non fanno ombra: la fa una sagoma piena invisibile
+  (`shadow_mesh`), molto più leggera. `shaders/foliage_cards.gdshader`: normale "della chioma", controluce, vento.
+- `shaders/building.gdshader`: intonaco invecchiato (macchie, rappezzi, umidità, sporco sotto il cornicione, colature
+  sotto i davanzali) e stanze finte dietro i vetri (interior mapping: pareti, parquet, soffitto, mobili; di notte
+  accese).
+- `landmarks.gd` → `_maxxi()`: il MAXXI di Zaha Hadid fatto a mano (nastri curvi di cemento, galleria a sbalzo con
+  vetrata nera, travi sul tetto); i palazzi generici del suo lotto non vengono costruiti (`in_maxxi`).
+
 ## Case
 
 - `scripts/homes.gd` (`Homes`): 16 case scelte nei palazzi veri (due per zona, portone sul lato verso la strada),

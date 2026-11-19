@@ -294,15 +294,13 @@ func _setup_world() -> void:
 	_sun.directional_shadow_split_3 = 0.45
 	add_child(_sun)
 
-	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.22, 0.42, 0.75)
-	sky_mat.sky_horizon_color = Color(0.72, 0.76, 0.8)
-	sky_mat.sky_curve = 0.12
-	sky_mat.ground_horizon_color = Color(0.6, 0.58, 0.54)
-	sky_mat.ground_bottom_color = Color(0.3, 0.28, 0.25)
-	sky_mat.sun_angle_max = 20.0
+	# Cielo disegnato da uno shader (shaders/sky.gdshader): nuvole, alone del sole, stelle. I colori li cambia DayNight.
+	var sky_mat := ShaderMaterial.new()
+	sky_mat.shader = load("res://shaders/sky.gdshader")
 	var sky := Sky.new()
 	sky.sky_material = sky_mat
+	sky.radiance_size = Sky.RADIANCE_SIZE_128
+	sky.process_mode = Sky.PROCESS_MODE_INCREMENTAL  # la luce del cielo si aggiorna a rate, senza scatti
 	_env = Environment.new()
 	_env.background_mode = Environment.BG_SKY
 	_env.sky = sky
@@ -318,17 +316,24 @@ func _setup_world() -> void:
 	_env.ssao_radius = 1.2
 	_env.ssao_intensity = 2.2
 	_env.fog_enabled = true
+	# Foschia: in lontananza i palazzi sbiadiscono nell'azzurro (prospettiva aerea) e verso il sole si accende
+	# di luce calda; più densa in basso, come la caligine sopra Roma.
 	_env.fog_light_color = Color(0.74, 0.78, 0.86)
-	_env.fog_sun_scatter = 0.25
-	_env.fog_density = 0.0006
-	_env.fog_aerial_perspective = 0.6
-	_env.fog_sky_affect = 0.2
+	_env.fog_sun_scatter = 0.35
+	_env.fog_density = 0.00065
+	_env.fog_aerial_perspective = 0.7
+	_env.fog_sky_affect = 0.25
+	_env.fog_height = 25.0
+	_env.fog_height_density = 0.0004
 	_env.glow_enabled = true
-	_env.glow_intensity = 0.35
-	_env.glow_bloom = 0.04
+	_env.glow_intensity = 0.45
+	_env.glow_strength = 1.0
+	_env.glow_bloom = 0.06
+	_env.glow_hdr_threshold = 1.1
+	_env.glow_blend_mode = Environment.GLOW_BLEND_MODE_SOFTLIGHT
 	_env.adjustment_enabled = true
-	_env.adjustment_saturation = 1.12
-	_env.adjustment_contrast = 1.06
+	_env.adjustment_saturation = 1.15
+	_env.adjustment_contrast = 1.08
 	var we := WorldEnvironment.new()
 	we.environment = _env
 	add_child(we)

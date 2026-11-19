@@ -101,6 +101,7 @@ func build() -> void:
 			_music_bridge(_pts(b["p"]))
 		else:
 			_arch_bridge(_pts(b["p"]), String(b["n"]))
+	_maxxi()
 
 
 # --- Strumenti --------------------------------------------------------------------------------
@@ -781,3 +782,143 @@ static func dome(acc: CityBuilder.Acc, c: Vector2, base_y: float, r: float) -> v
 			((d0 + d1) * 0.5).normalized(), Color.WHITE, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
 		acc.tri(top + d0 + Vector3(0, r * 0.35, 0), top + d1 + Vector3(0, r * 0.35, 0), top + Vector3(0, r * 0.55, 0),
 			((d0 + d1) * 0.5).normalized() + Vector3.UP, Color.WHITE, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO, Vector2.ZERO)
+
+
+# --- MAXXI (Zaha Hadid, 2010) ------------------------------------------------------------------------
+## Nastri di cemento chiaro lunghi e curvi che si intrecciano: il corpo lungo a nord, l'ala est che scende
+## verso via Guido Reni, e la galleria 5 sollevata a sbalzo sopra la piazza con la grande vetrata nera in
+## fondo. Sul tetto le travi parallele dei lucernari. Le linee centrali sono ricavate dalla pianta di
+## OpenStreetMap (relazione MAXXI) e smussate con una spline.
+
+const MAXXI_A := [Vector2(-628, -716), Vector2(-590, -727), Vector2(-552, -737), Vector2(-505, -746), Vector2(-466, -754)]
+const MAXXI_B := [Vector2(-466, -754), Vector2(-450, -728), Vector2(-441, -700), Vector2(-427, -664)]
+const MAXXI_C := [Vector2(-548, -738), Vector2(-536, -712), Vector2(-524, -684), Vector2(-512, -657)]
+## Il lotto del MAXXI (OpenStreetMap, relazione 8748353).
+const MAXXI_SITE := [Vector2(-448.1, -783.2), Vector2(-433.4, -736.3), Vector2(-426.6, -714.5), Vector2(-406.7, -651.1),
+	Vector2(-416.9, -648.0), Vector2(-432.1, -643.4), Vector2(-440.1, -641.0), Vector2(-461.6, -634.4), Vector2(-518.7, -617.5),
+	Vector2(-524.8, -637.8), Vector2(-549.2, -716.3), Vector2(-625.0, -694.4), Vector2(-710.1, -669.6), Vector2(-711.7, -675.2),
+	Vector2(-719.7, -703.6), Vector2(-721.9, -711.2), Vector2(-638.9, -735.7), Vector2(-632.6, -726.7), Vector2(-552.3, -752.1),
+	Vector2(-520.8, -762.1), Vector2(-484.7, -760.1), Vector2(-453.7, -770.4), Vector2(-450.5, -771.4), Vector2(-453.5, -781.2)]
+
+
+## Gli edifici generici dentro il lotto del MAXXI (a est della vecchia caserma): city_builder non li costruisce.
+static func in_maxxi(pts: PackedVector2Array) -> bool:
+	var c := Vector2.ZERO
+	for q in pts:
+		c += q
+	c /= pts.size()
+	return c.x > -640.0 and Geometry2D.is_point_in_polygon(c, PackedVector2Array(MAXXI_SITE))
+
+
+func _maxxi() -> void:
+	var conc := _panels(Color(0.86, 0.85, 0.82), 4.5, 1.8, 0.0, 0.7)  # cemento a vista con i giunti dei casseri
+	var walls := CityBuilder.Acc.new()
+	var glass := CityBuilder.Acc.new()
+	var fins := CityBuilder.Acc.new()
+	var ground := INF
+	for path: Array in [MAXXI_A, MAXXI_B, MAXXI_C]:
+		for q: Vector2 in path:
+			ground = minf(ground, city.height_at(q.x, q.y))
+	var g := ground - 0.3
+	# Corpo lungo: due piani di nastri, quello alto un po' più largo e spostato (gli sbalzi di Zaha).
+	_ribbon(walls, glass, _spline(MAXXI_A), 30.0, g, g + 4.5, 0.0, true)
+	_ribbon(walls, glass, _spline(MAXXI_A), 30.0, g + 4.5, g + 10.0, 0.0, false)
+	_ribbon(walls, glass, _spline(MAXXI_A), 33.0, g + 10.0, g + 18.0, 1.5, false)
+	# Ala est, più bassa, con il piano terra vetrato.
+	_ribbon(walls, glass, _spline(MAXXI_B), 26.0, g, g + 4.5, 0.0, true)
+	_ribbon(walls, glass, _spline(MAXXI_B), 26.0, g + 4.5, g + 14.0, 0.0, false)
+	# Galleria 5: sollevata, a sbalzo sulla piazza, chiusa da una vetrata nera.
+	var c_path := _spline(MAXXI_C)
+	_ribbon(walls, glass, c_path, 22.0, g + 11.0, g + 20.0, 0.0, false, true)
+	# Pilastri sottili sotto la galleria (solo nella prima metà: la punta è a sbalzo).
+	for i in range(0, int(c_path.size() * 0.45), 4):
+		var q: Vector2 = c_path[i]
+		_cyl(walls, Vector3(q.x, g, q.y), 0.45, 0.45, 11.0, 10, false)
+	# Tetto: travi parallele dei lucernari lungo i nastri.
+	for spec: Array in [[MAXXI_A, 33.0, g + 18.0], [MAXXI_B, 26.0, g + 14.0], [MAXXI_C, 22.0, g + 20.0]]:
+		var path := _spline(spec[0])
+		var w: float = spec[1]
+		var k := -w * 0.5 + 2.0
+		while k < w * 0.5 - 1.5:
+			for i in path.size() - 1:
+				var a: Vector2 = path[i]
+				var b: Vector2 = path[i + 1]
+				var nrm := (b - a).orthogonal().normalized()
+				_strut(fins, Vector3(a.x, 0, a.y) + Vector3(nrm.x, 0, nrm.y) * k + Vector3(0, spec[2] + 0.5, 0),
+					Vector3(b.x, 0, b.y) + Vector3(nrm.x, 0, nrm.y) * k + Vector3(0, spec[2] + 0.5, 0), 0.25, 1.0)
+			k += 2.6
+	_finish(walls, conc, "MAXXI")
+	var gl := StandardMaterial3D.new()
+	gl.albedo_color = Color(0.02, 0.025, 0.03)
+	gl.metallic = 0.4
+	gl.roughness = 0.04
+	_finish(glass, gl, "MAXXI_vetri")
+	var fin_mat := StandardMaterial3D.new()
+	fin_mat.albedo_color = Color(0.9, 0.9, 0.88)
+	fin_mat.roughness = 0.6
+	_finish(fins, fin_mat, "MAXXI_travi", false)
+
+
+## Spline di Catmull-Rom che passa per i punti, un campione ogni ~4 m.
+func _spline(ctrl: Array) -> Array:
+	var out := []
+	for i in ctrl.size() - 1:
+		var p0: Vector2 = ctrl[maxi(i - 1, 0)]
+		var p1: Vector2 = ctrl[i]
+		var p2: Vector2 = ctrl[i + 1]
+		var p3: Vector2 = ctrl[mini(i + 2, ctrl.size() - 1)]
+		var n := maxi(int(p1.distance_to(p2) / 4.0), 2)
+		for k in n:
+			var t := float(k) / n
+			var t2 := t * t
+			var t3 := t2 * t
+			out.append(0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3))
+	out.append(ctrl[ctrl.size() - 1])
+	return out
+
+
+## Nastro: sezione rettangolare larga w da y0 a y1 lungo il percorso. shift sposta il nastro di lato;
+## glazed: piano terra a vetri (rientrato); glass_end: la testata finale è una vetrata nera.
+func _ribbon(acc: CityBuilder.Acc, glass: CityBuilder.Acc, path: Array, w: float, y0: float, y1: float, shift: float,
+		glazed: bool, glass_end := false) -> void:
+	var left := []
+	var right := []
+	for i in path.size():
+		var a: Vector2 = path[maxi(i - 1, 0)]
+		var b: Vector2 = path[mini(i + 1, path.size() - 1)]
+		var nrm := (b - a).orthogonal().normalized()
+		var p: Vector2 = path[i] + nrm * shift
+		left.append(p + nrm * w * 0.5)
+		right.append(p - nrm * w * 0.5)
+	var inset := 1.5 if glazed else 0.0
+	var u := 0.0
+	for i in path.size() - 1:
+		var seg: float = (path[i] as Vector2).distance_to(path[i + 1])
+		var uv := Rect2(u, y0, seg, y1 - y0)
+		for side: Array in [[left, 1.0], [right, -1.0]]:
+			var pts: Array = side[0]
+			var a: Vector2 = pts[i]
+			var b: Vector2 = pts[i + 1]
+			var c: Vector2 = path[i]
+			var d: Vector2 = path[i + 1]
+			if inset > 0.0:
+				a = a + (c - a).normalized() * inset
+				b = b + (d - b).normalized() * inset
+			var target := glass if glazed else acc
+			_qa(target, _v3(a, y0), _v3(b, y0), _v3(b, y1), _v3(a, y1), _v3((c + d) * 0.5, (y0 + y1) * 0.5), uv)
+		var la: Vector2 = left[i]
+		var lb: Vector2 = left[i + 1]
+		var ra: Vector2 = right[i]
+		var rb: Vector2 = right[i + 1]
+		_q(acc, _v3(la, y1), _v3(lb, y1), _v3(rb, y1), _v3(ra, y1), Vector3.UP, uv)
+		_q(acc, _v3(la, y0), _v3(lb, y0), _v3(rb, y0), _v3(ra, y0), Vector3.DOWN, uv)
+		u += seg
+	# Testate.
+	for end: Array in [[0, 1], [path.size() - 1, path.size() - 2]]:
+		var i: int = end[0]
+		var l: Vector2 = left[i]
+		var r: Vector2 = right[i]
+		var inward: Vector2 = path[end[1]]
+		var is_glass := glass_end and i == path.size() - 1
+		_qa(glass if (is_glass or glazed) else acc, _v3(l, y0), _v3(r, y0), _v3(r, y1), _v3(l, y1), _v3(inward, (y0 + y1) * 0.5),
+			Rect2(0, y0, w, y1 - y0))

@@ -112,8 +112,8 @@ static func _place(kind: String, poi: Array, blds: Array, polys: Array, boxes: A
 		if not (boxes[i] as Rect2).grow(30.0).has_point(at):
 			continue
 		var p: PackedVector2Array = polys[i]
-		if Geometry2D.triangulate_polygon(p).is_empty():
-			continue
+		if Geometry2D.triangulate_polygon(p).is_empty() or LandmarkBuilder.in_maxxi(p):
+			continue  # i palazzi generici del lotto del MAXXI non vengono costruiti
 		var d := 0.0
 		if not Geometry2D.is_point_in_polygon(at, p):
 			d = INF

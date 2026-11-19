@@ -14,6 +14,7 @@ const Y_TRAM := 0.075
 const FLOOR_H := 3.2
 const BAY_W := 3.4
 const NEAR_RANGE := 260.0
+const TREE_NEAR := 120.0  # entro questa distanza gli alberi hanno tutti i rami e i ciuffi
 const TERRAIN_CHUNK := 64  # celle per blocco di terreno (128 m)
 const TERRAIN_NEAR := 380.0  # oltre questa distanza i blocchi di terreno passano alla maglia leggera  # oltre questa distanza alberi, balconi e lampioni passano alla versione semplice
 const AREA_COLORS := {
@@ -308,7 +309,7 @@ func _add_trimesh_body(faces: PackedVector3Array, node_name: String) -> void:
 
 
 ## MultiMesh divisi per riquadro, con distanza di visibilità (begin/end) per i livelli di dettaglio.
-func _add_multimesh_chunks(mesh: Mesh, by_chunk: Dictionary, node_name: String, vis_begin: float, vis_end: float) -> void:
+func _add_multimesh_chunks(mesh: Mesh, by_chunk: Dictionary, node_name: String, vis_begin: float, vis_end: float, shadows := true, shadow_only := false) -> void:
 	for key: Vector2i in by_chunk:
 		var list: Array = by_chunk[key]
 		if list.is_empty():
@@ -332,6 +333,10 @@ func _add_multimesh_chunks(mesh: Mesh, by_chunk: Dictionary, node_name: String, 
 		mmi.visibility_range_begin_margin = 10.0 if vis_begin > 0.0 else 0.0
 		mmi.visibility_range_end_margin = 10.0 if vis_end > 0.0 else 0.0
 		mmi.visibility_range_fade_mode = GeometryInstance3D.VISIBILITY_RANGE_FADE_SELF
+		if not shadows:
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		elif shadow_only:
+			mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_SHADOWS_ONLY
 		add_child(mmi)
 
 
@@ -933,6 +938,8 @@ func _build_buildings() -> void:
 		var pts := _pts(b["p"])
 		if pts.size() < 3 or b.has("enter"):
 			continue
+		if LandmarkBuilder.in_maxxi(pts):
+			continue  # al loro posto c'è il MAXXI fatto a mano (landmarks.gd)
 		if Geometry2D.triangulate_polygon(pts).is_empty():
 			# Pianta che si autointerseca: meglio il suo inviluppo convesso che muri al rovescio.
 			pts = Geometry2D.convex_hull(pts)
@@ -951,7 +958,7 @@ func _build_buildings() -> void:
 			center += p
 		center /= pts.size()
 		var ground := height_at(center.x, center.y)
-		var modern: bool = b.get("style", "") == "modern"
+		var modern := false  # il MAXXI ora è fatto a mano; la vecchia caserma accanto è un palazzo normale
 		var y0 := ground - 0.4 + float(b.get("m", 0.0))
 		var foot := y0  # piede del muro: in discesa scende sotto il piano del palazzo
 		if not b.has("m"):
@@ -1151,63 +1158,6 @@ func _merged(parts: Array, mat: Material, mesh: ArrayMesh) -> void:
 	st.commit(mesh)
 
 
-## Albero: tronco e chioma fatta di molti ciuffi. umbrella = pino domestico (chioma piatta e larga).
-func _tree_mesh(umbrella: bool, detailed: bool, bark: Material, leaves: Material) -> ArrayMesh:
-	var mesh := ArrayMesh.new()
-	var rng := RandomNumberGenerator.new()
-	rng.seed = 11 if umbrella else 23
-	var trunk_h := 9.0 if umbrella else 5.0
-	var trunk := CylinderMesh.new()
-	trunk.top_radius = 0.18 if umbrella else 0.22
-	trunk.bottom_radius = 0.3
-	trunk.height = trunk_h
-	trunk.radial_segments = 8 if detailed else 5
-	trunk.rings = 2
-	var trunk_parts := [[trunk, Transform3D(Basis(Vector3.FORWARD, 0.05 if umbrella else 0.0), Vector3(0, trunk_h * 0.5, 0))]]
-	if detailed and not umbrella:
-		for k in 3:
-			var br := CylinderMesh.new()
-			br.top_radius = 0.06
-			br.bottom_radius = 0.14
-			br.height = 2.6
-			br.radial_segments = 5
-			br.rings = 1
-			var ang := TAU * k / 3.0
-			var bb := Basis(Vector3.UP, ang) * Basis(Vector3.FORWARD, 0.7)
-			trunk_parts.append([br, Transform3D(bb, Vector3(cos(ang) * 0.5, trunk_h + 0.6, -sin(ang) * 0.5))])
-	_merged(trunk_parts, bark, mesh)
-
-	var blobs := []
-	var count := (16 if umbrella else 14) if detailed else 3
-	for k in count:
-		var s := SphereMesh.new()
-		s.radial_segments = 7 if detailed else 9
-		s.rings = 4 if detailed else 5
-		var r: float
-		var pos: Vector3
-		var flat: float
-		if umbrella:
-			var ang := rng.randf() * TAU
-			var dist := sqrt(rng.randf()) * 3.6
-			r = rng.randf_range(1.3, 2.0) if detailed else 3.6
-			pos = Vector3(cos(ang) * dist, trunk_h + 0.6 + rng.randf_range(-0.3, 0.5), sin(ang) * dist)
-			flat = 0.45
-			if not detailed:
-				pos = Vector3(0, trunk_h + 0.6, 0) + Vector3(k - 1, 0, (k % 2) - 0.5) * 1.2
-		else:
-			var dir := Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.6, 1), rng.randf_range(-1, 1)).normalized()
-			r = rng.randf_range(1.2, 1.9) if detailed else 3.0
-			pos = Vector3(0, trunk_h + 2.2, 0) + dir * Vector3(2.6, 2.2, 2.6) * rng.randf_range(0.4, 1.0)
-			flat = 0.8
-			if not detailed:
-				pos = Vector3(0, trunk_h + 2.0, 0) + Vector3(k - 1, (k % 2) * 0.8, 0) * 1.0
-		s.radius = r
-		s.height = r * 2.0
-		blobs.append([s, Transform3D(Basis().scaled(Vector3(1, flat, 1)), pos)])
-	_merged(blobs, leaves, mesh)
-	return mesh
-
-
 func _build_trees() -> void:
 	var bark := StandardMaterial3D.new()
 	bark.albedo_texture = TexLib.tex("Bark014", "color")
@@ -1215,16 +1165,16 @@ func _build_trees() -> void:
 	bark.normal_texture = TexLib.tex("Bark014", "normal")
 	bark.uv1_triplanar = true
 	bark.uv1_scale = Vector3(0.8, 0.8, 0.8)
-	var leaves := ShaderMaterial.new()
-	leaves.shader = load("res://shaders/foliage.gdshader")
-	var pine_leaves := leaves.duplicate()
-	pine_leaves.set_shader_parameter("leaf_color", Color(0.2, 0.3, 0.14))
-	leaves.set_shader_parameter("leaf_color", Color(0.33, 0.45, 0.17))
-	var meshes := {
-		"Pini": [_tree_mesh(true, true, bark, pine_leaves), _tree_mesh(true, false, bark, pine_leaves)],
-		"Platani": [_tree_mesh(false, true, bark, leaves), _tree_mesh(false, false, bark, leaves)],
-	}
-	var lists := {"Pini": {}, "Platani": {}}
+	bark.albedo_color = Color(0.78, 0.72, 0.68)  # corteccia meno arancione, più grigio-bruna
+	# Alberi con rami e chiome di foglie vere (scripts/trees.gd): tre specie, tre livelli di dettaglio.
+	var meshes := {}
+	var lists := {}
+	for kind: String in TreeKit.KINDS:
+		var lm := TreeKit.leaves_material(kind)
+		meshes[kind] = []
+		for lod in TreeKit.LODS:
+			meshes[kind].append(TreeKit.mesh(kind, lod, bark, lm))
+		lists[kind] = {}
 	var bodies := {}  # un corpo per riquadro: aggiungere migliaia di forme a un solo corpo è lentissimo
 	var trunk_shape := CylinderShape3D.new()
 	trunk_shape.radius = 0.3
@@ -1245,7 +1195,8 @@ func _build_trees() -> void:
 			continue  # niente alberi in acqua o sul muraglione
 		var s := rng.randf_range(0.8, 1.2)
 		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(s, s * rng.randf_range(0.9, 1.15), s)), Vector3(x, g, zz))
-		_push(lists["Pini"] if rng.randf() < 0.35 else lists["Platani"], xf)
+		var pick := rng.randf()
+		_push(lists["pino" if pick < 0.35 else ("platano" if pick < 0.75 else "leccio")], xf)
 		var key := _chunk_key(Vector2(x, zz))
 		if not bodies.has(key):
 			var b := StaticBody3D.new()
@@ -1258,8 +1209,11 @@ func _build_trees() -> void:
 		cs.position = Vector3(x, g + 2.0, zz)
 		bodies[key].add_child(cs)
 	for kind: String in lists:
-		_add_multimesh_chunks(meshes[kind][0], lists[kind], kind, 0.0, NEAR_RANGE)
-		_add_multimesh_chunks(meshes[kind][1], lists[kind], kind + "Lontani", NEAR_RANGE, 0.0)
+		# Le chiome trasparenti non fanno ombra (costerebbe troppo): la fa una sagoma piena e semplice, invisibile.
+		_add_multimesh_chunks(meshes[kind][0], lists[kind], "Alberi_" + kind, 0.0, TREE_NEAR, false)
+		_add_multimesh_chunks(meshes[kind][1], lists[kind], "Alberi_%s_medi" % kind, TREE_NEAR, NEAR_RANGE, false)
+		_add_multimesh_chunks(TreeKit.shadow_mesh(kind), lists[kind], "Alberi_%s_ombre" % kind, 0.0, NEAR_RANGE, true, true)
+		_add_multimesh_chunks(meshes[kind][2], lists[kind], "Alberi_%s_lontani" % kind, NEAR_RANGE, 0.0, false)
 
 
 ## Muri invisibili sul bordo della mappa.

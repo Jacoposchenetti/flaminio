@@ -89,6 +89,8 @@ func _pick() -> void:
 		if b.has("enter") or b.has("venue") or b.has("part") or b.has("dome") or b.get("style", "") != "" or float(b["h"]) < 9.0:
 			continue
 		var poly := Venues._poly(b)
+		if LandmarkBuilder.in_maxxi(poly):
+			continue
 		var c := Vector2.ZERO
 		for q in poly:
 			c += q

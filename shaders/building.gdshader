@@ -18,9 +18,52 @@ global uniform float night; // 0 di giorno, 1 di notte (DayNight): finestre e ve
 
 varying vec3 tint;
 varying vec3 wpos;
+varying vec3 wnorm;
 
 float hash(vec2 p) {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float vnoise(vec2 p) {
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+	return vnoise(p) * 0.55 + vnoise(p * 2.1 + 3.7) * 0.3 + vnoise(p * 4.3 + 9.1) * 0.15;
+}
+
+// Stanza finta dietro il vetro (interior mapping): il raggio dalla camera entra dalla finestra e colpisce
+// pareti, pavimento o soffitto di una scatola; cambia prospettiva mentre ci si muove.
+// lp: punto sulla finestra in metri (x lungo il muro, y in alto, 0 al centro della finestra).
+vec3 room(vec2 lp, vec3 rd, float seed, float floor_y, float ceil_y, out float lit_mask) {
+	float hw = 1.9;
+	float depth = 4.0;
+	vec3 inv = sign(rd + 1e-6) / max(abs(rd), vec3(1e-4));
+	float tx = ((rd.x > 0.0 ? hw : -hw) - lp.x) * inv.x;
+	float ty = ((rd.y > 0.0 ? ceil_y : floor_y) - lp.y) * inv.y;
+	float tz = depth * inv.z;
+	float t = min(tx, min(ty, tz));
+	vec3 hit = vec3(lp, 0.0) + rd * t;
+	vec3 wall = mix(vec3(0.85, 0.8, 0.7), vec3(0.7, 0.78, 0.82), step(0.6, seed)); // pareti color crema o azzurrine
+	wall = mix(wall, vec3(0.9, 0.88, 0.85), step(0.85, seed));
+	vec3 c;
+	if (t == tz) {
+		c = wall * 0.8; // parete di fondo
+		// Un mobile e un quadro.
+		if (abs(hit.x - (seed - 0.5) * 1.6) < 0.5 && hit.y > floor_y + 0.2 && hit.y < floor_y + 1.9 && seed > 0.3) c = vec3(0.35, 0.24, 0.16);
+		if (abs(hit.x + (seed - 0.5)) < 0.35 && abs(hit.y - 0.3) < 0.25) c = vec3(0.5, 0.4, 0.35);
+	} else if (t == ty) {
+		c = rd.y > 0.0 ? vec3(0.92, 0.9, 0.86) : vec3(0.42, 0.28, 0.17) * (0.85 + 0.15 * step(0.5, fract(hit.x * 2.5))); // soffitto o parquet
+	} else {
+		c = wall * 0.9;
+	}
+	// Più buio in fondo.
+	c *= mix(1.0, 0.45, clamp(hit.z / depth, 0.0, 1.0));
+	lit_mask = (rd.y > 0.0 && t == ty) ? 1.0 : 0.6;
+	return c;
 }
 
 vec3 srgb(vec3 c) {
@@ -30,6 +73,7 @@ vec3 srgb(vec3 c) {
 void vertex() {
 	tint = pow(COLOR.rgb, vec3(2.2)) / 0.62; // palette in sRGB; l'intonaco ha albedo ~0,62
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	wnorm = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	if (abs(NORMAL.y) > 0.5) {
 		TANGENT = vec3(1.0, 0.0, 0.0);
 		BINORMAL = vec3(0.0, 0.0, 1.0);
@@ -79,8 +123,13 @@ void fragment() {
 		vec3 plaster = texture(plaster_albedo, suv).rgb;
 		// L'intonaco è quasi bianco: lo tingo con il colore dell'edificio, con macchie e sporco in basso.
 		col = plaster * tint;
-		col *= 0.9 + 0.1 * hash(vec2(floor(u / 7.0), floor(v / 5.0)));
-		col *= mix(0.82, 1.0, smoothstep(0.0, 4.0, v));
+		// Intonaco vissuto: macchie larghe, rappezzi ridipinti, umidità in basso, sporco sotto il cornicione.
+		float stain = fbm(vec2(u, v) / 5.0 + hash(floor(wpos.xz / 60.0)) * 30.0);
+		col *= 0.82 + 0.3 * stain;
+		float patch_v = hash(vec2(floor(u / 6.0), floor(v / 4.5)));
+		col *= patch_v > 0.85 ? 1.07 : (patch_v < 0.1 ? 0.93 : 1.0);
+		col *= mix(0.72, 1.0, smoothstep(0.2, 2.6 + stain * 1.5, v));
+		col *= mix(0.78, 1.0, smoothstep(0.0, 1.3, h - v));
 		float bay = floor(u / bay_w);
 		float fu = fract(u / bay_w);
 		float lv = floor((v - 0.4) / floor_h);
@@ -126,12 +175,24 @@ void fragment() {
 					nmap = vec3(0.5, mix(0.35, 0.65, slat), 1.0);
 					rough = 0.55;
 				} else {
-					// Vetro con riflessi; tenda chiara in alto in alcune finestre.
-					col = vec3(0.02, 0.025, 0.03);
-					if (r > 0.75 && c.y > -0.05) col = srgb(vec3(0.75, 0.72, 0.62)) * 0.35;
-					// Di notte una parte delle finestre è illuminata (luce calda, qualcuna più fredda: la TV).
+					// Vetro: riflette il cielo; dietro si vede una stanza vera (prospettiva che cambia).
+					vec3 tw = normalize(cross(vec3(0.0, 1.0, 0.0), wnorm));
+					vec3 vd = normalize(wpos - CAMERA_POSITION_WORLD);
+					vec3 rd = vec3(dot(vd, tw), vd.y, max(dot(vd, -wnorm), 0.05));
+					vec2 lp = vec2(c.x * bay_w, c.y * floor_h);
+					float lm;
+					vec3 inside = room(lp, rd, r, -0.52 * floor_h, 0.48 * floor_h, lm);
+					col = vec3(0.015, 0.018, 0.022);
 					float lit = hash(vec2(bay * 1.7 + 3.0, lv * 5.3 + floor(u / 50.0)));
-					if (lit < 0.32) emit = (lit < 0.05 ? vec3(0.55, 0.65, 1.0) : vec3(1.0, 0.78, 0.5)) * (0.9 + lit * 2.0) * night;
+					// Di giorno la stanza si intravede in penombra; di notte una parte delle finestre è accesa
+					// (luce calda, qualcuna più fredda: la TV).
+					emit = srgb(inside) * 0.07 * (1.0 - night);
+					if (lit < 0.32) emit += srgb(inside) * (lit < 0.05 ? vec3(0.55, 0.65, 1.0) : vec3(1.0, 0.8, 0.55)) * (1.1 + lit * 2.0) * mix(0.7, 1.0, lm) * night;
+					// Tenda chiara in alto in alcune finestre.
+					if (r > 0.75 && c.y > -0.05) {
+						col = srgb(vec3(0.75, 0.72, 0.62)) * 0.35;
+						emit *= 0.5;
+					}
 					rough = 0.04;
 					spec = 1.0;
 					metal = 0.15;
@@ -139,7 +200,12 @@ void fragment() {
 					// Imbotte: ombra sul bordo alto e a sinistra, finestra incassata.
 					float edge = smoothstep(0.29, 0.22, c.y) * smoothstep(-0.19, -0.13, c.x);
 					col *= mix(0.4, 1.0, edge);
+					emit *= mix(0.5, 1.0, edge);
 				}
+			} else if (abs(c.x) < 0.2 && c.y < -0.34 && v < h - 1.0) {
+				// Colature di pioggia sotto il davanzale.
+				float streak = vnoise(vec2(u * 9.0, 0.5)) * smoothstep(-0.95, -0.34, c.y);
+				col *= 1.0 - 0.22 * streak;
 			} else if (frame) {
 				col = srgb(vec3(0.9, 0.87, 0.8)); // cornice della finestra
 				rough = 0.7;
