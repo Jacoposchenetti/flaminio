@@ -301,6 +301,17 @@ class Pedestrian:
 	var _pause := 0.0
 	var _dead_t := 0.0
 	var _cower := false
+	## Reazioni ai colpi: barcolla (_r_stun), finisce a terra (_r_down) e si rialza (_r_getup); i più tosti
+	## (fighter, circa un uomo su tre) rispondono a pugni a chi li ha colpiti (_r_foe = peer del giocatore).
+	var fighter := false
+	var fights_back := true  # i commessi hanno la loro reazione (Clerk)
+	var _r_stun := 0.0
+	var _r_down := 0.0
+	var _r_getup := 0.0
+	var _r_hits := 0
+	var _r_foe := 0
+	var _r_foe_t := 0.0
+	var _r_punch := 0.0
 
 	func _ready() -> void:
 		add_to_group("damageable")
@@ -318,6 +329,7 @@ class Pedestrian:
 		_human = Human.new().setup(preset)
 		add_child(_human)
 		_human.play("stroll")
+		fighter = preset.begins_with("m") and randf() < 0.35
 
 	func is_mine() -> bool:
 		return true
@@ -332,12 +344,17 @@ class Pedestrian:
 
 	## Tirato fuori dall'auto: cade, poi si rialza e scappa (senza farsi rubare il posto da altri percorsi).
 	func thrown_out(from: Vector3) -> void:
-		_human.play_once("hit")
 		_pause = 0.0
 		_fear = 10.0
 		_cower = false
 		_from = from
-		velocity = (global_position - from).normalized() * 3.0 + Vector3.UP * 2.0
+		# Cade a terra, si rialza (_react) e poi scappa.
+		var away := global_position - from
+		away.y = 0.0
+		velocity = away.normalized() * 2.5 + Vector3.UP * 1.5
+		_r_down = 1.6
+		_human.play_once("death", 0.05)
+		net_anim = "knock"
 		# Per due secondi l'auto appena rubata non lo investe mentre riparte.
 		set_meta("safe_until", Time.get_ticks_msec() + 2500)
 
@@ -353,8 +370,11 @@ class Pedestrian:
 			return
 		mgr.world.crime("shots", at, from_peer)
 		health -= amount
-		scare(at)
+		# Corpo a corpo: chi l'ha colpito gli sta accanto (pugni, coltello, mazza).
+		var hitter := _player_near(from_peer, 3.4)
+		var src := hitter.global_position if hitter else at
 		if health <= 0.0:
+			scare(at)
 			dead = true
 			net_anim = "death"
 			_human.play_once("death")
@@ -362,8 +382,105 @@ class Pedestrian:
 			mgr.world.crime("kill", global_position, from_peer)
 			if randf() < 0.8:
 				mgr.drop_cash(global_position, randi_range(20, 150))
+			return
+		var away := global_position - src
+		away.y = 0.0
+		away = away.normalized() if away.length() > 0.05 else Vector3.FORWARD
+		_human.rotation.y = atan2(-away.x, -away.z)  # si gira verso il colpo
+		if hitter:
+			_r_hits += 1
+			if amount >= 25.0 or (_r_hits >= 3 and randf() < 0.6):
+				# Una mazzata (o l'ennesimo pugno) lo butta a terra.
+				_r_down = 2.4
+				_r_hits = 0
+				velocity = away * (5.0 if amount >= 25.0 else 3.2) + Vector3.UP * 2.5
+				_human.play_once("death", 0.05)
+				net_anim = "knock"
+			else:
+				_r_stun = 0.6
+				velocity = away * 2.8 + Vector3.UP * 0.6
+				net_anim = "hit_head" if _r_hits % 2 == 0 else "hit"
+				_human.play_once(net_anim)
 		else:
+			_r_stun = 0.35
+			net_anim = "hit"
 			_human.play_once("hit")
+		if fighter and fights_back and hitter and from_peer > 0:
+			_r_foe = from_peer
+			_r_foe_t = 20.0
+			_fear = 0.0
+		elif _r_foe == 0:
+			scare(src)
+
+	## Sta reagendo a un colpo (barcolla, è a terra o si rialza): non fa altro.
+	func reacting() -> bool:
+		return _r_stun > 0.0 or _r_down > 0.0 or _r_getup > 0.0
+
+	func _player_near(peer: int, r: float) -> Player:
+		if peer <= 0:
+			return null
+		var p: Player = mgr.world.players().get(peer)
+		return p if p and not p.dead and p.global_position.distance_to(global_position) < r else null
+
+	## Barcollare, stare a terra e rialzarsi; poi (se è un tipo tosto) fare a botte. true = frame già gestito.
+	func _react(delta: float) -> bool:
+		if _r_down > 0.0:
+			_r_down -= delta
+			velocity.x = move_toward(velocity.x, 0.0, 7.0 * delta)
+			velocity.z = move_toward(velocity.z, 0.0, 7.0 * delta)
+			velocity.y = 0.0 if is_on_floor() and velocity.y <= 0.0 else velocity.y - 16.0 * delta
+			move_and_slide()
+			if _r_down <= 0.0:
+				_r_getup = 1.4
+				_human.play_getup()
+				net_anim = "getup"
+			return true
+		if _r_getup > 0.0 or _r_stun > 0.0:
+			_r_getup -= delta
+			_r_stun -= delta
+			velocity.x = move_toward(velocity.x, 0.0, 9.0 * delta)
+			velocity.z = move_toward(velocity.z, 0.0, 9.0 * delta)
+			velocity.y = 0.0 if is_on_floor() and velocity.y <= 0.0 else velocity.y - 16.0 * delta
+			move_and_slide()
+			return true
+		if _r_foe > 0:
+			return _fight_back(delta)
+		return false
+
+	## Risponde a pugni a chi l'ha colpito; dopo un po', o se l'altro scappa lontano, lascia perdere e se ne va.
+	func _fight_back(delta: float) -> bool:
+		var p: Player = mgr.world.players().get(_r_foe)
+		_r_foe_t -= delta
+		_r_punch -= delta
+		if p == null or p.dead or _r_foe_t <= 0.0 or p.global_position.distance_to(global_position) > 35.0:
+			_r_foe = 0
+			if p:
+				scare(p.global_position)
+			return false
+		var to := p.global_position - global_position
+		to.y = 0.0
+		var dist := to.length()
+		var target_v := Vector3.ZERO
+		var anim := "aim"  # guardia alta
+		if dist > 1.3:
+			target_v = to.normalized() * 5.2
+			anim = "sprint"
+		elif _r_punch <= 0.0:
+			_r_punch = randf_range(0.8, 1.2)
+			mgr.combat.melee(self, "pugni", global_position + Vector3(0, 1.3, 0), to.normalized())
+			anim = "punch" if randf() < 0.5 else "punch2"
+			_human.play_once(anim)
+		velocity.x = lerpf(velocity.x, target_v.x, 1.0 - exp(-8.0 * delta))
+		velocity.z = lerpf(velocity.z, target_v.z, 1.0 - exp(-8.0 * delta))
+		velocity.y = 0.0 if is_on_floor() else velocity.y - 16.0 * delta
+		move_and_slide()
+		_human.rotation.y = lerp_angle(_human.rotation.y, atan2(to.x, to.z), 1.0 - exp(-12.0 * delta))
+		if anim == "sprint" or anim == "aim":
+			_human.play("sprint" if anim == "sprint" else "idle")
+			net_anim = "sprint" if anim == "sprint" else "idle"
+		else:
+			net_anim = "punch"
+		return true
 
 	func _physics_process(delta: float) -> void:
 		if dead:
@@ -372,6 +489,8 @@ class Pedestrian:
 			move_and_slide()
 			if _dead_t > 40.0:
 				queue_free()
+			return
+		if _react(delta):
 			return
 		var target_v := Vector3.ZERO
 		var anim := "idle"
@@ -442,6 +561,7 @@ class Clerk:
 
 	func _ready() -> void:
 		super._ready()
+		fights_back = false  # il commesso reagisce a modo suo (rapina, pistola)
 		set_meta("clerk", true)
 		health = 80.0
 		_human.play("idle")
@@ -518,7 +638,7 @@ class Clerk:
 		return get_world_3d().direct_space_state.intersect_ray(q).is_empty()
 
 	func _physics_process(delta: float) -> void:
-		if dead or state == "flee":
+		if dead or state == "flee" or reacting():
 			super._physics_process(delta)
 			if _fear <= 0.0 and state == "flee":
 				state = "done"  # resta in giro come un passante qualunque
@@ -617,7 +737,7 @@ class Dealer:
 			mgr.drop_cash(global_position, randi_range(200, 600))
 
 	func _physics_process(delta: float) -> void:
-		if dead or _fear > 0.0:
+		if dead or _fear > 0.0 or reacting() or _r_foe > 0:
 			super._physics_process(delta)
 			return
 		var to := anchor - global_position

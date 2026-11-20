@@ -13,7 +13,10 @@ const RADIUS := 380.0
 const FIELDS := 9
 const PER_PART := 30
 enum Kind { PERSON, COP, CAR, POLICE_CAR, CASH, AMMO, POLICE_HELI, GANG }
-const ANIMS := ["idle", "stroll", "walk", "sprint", "talk", "crouch", "aim", "shoot", "death", "hit", "crouch_walk", "jump", "fall"]
+const ANIMS := ["idle", "stroll", "walk", "sprint", "talk", "crouch", "aim", "shoot", "death", "hit", "crouch_walk", "jump", "fall",
+	"hit_head", "knock", "getup", "punch"]
+## Animazioni brevi: sulle copie partono una volta quando cambiano, non a ogni aggiornamento.
+const ONCE := ["shoot", "hit", "hit_head", "knock", "getup", "punch"]
 
 var world: Node  # main.gd
 var police_active := true
@@ -186,6 +189,7 @@ class PersonPuppet:
 	var _gun_node: Node3D
 	var _target := Vector3.ZERO
 	var _yaw := 0.0
+	var _last_anim := ""
 	var _dead := false
 
 	func _ready() -> void:
@@ -233,10 +237,20 @@ class PersonPuppet:
 				_gun_node.queue_free()
 				_gun_node = null
 		elif not dead:
-			if anim == "shoot" or anim == "hit":
-				_human.play_once(anim, 0.02)
+			if anim in ONCE:
+				if anim != _last_anim or anim == "shoot":
+					match anim:
+						"knock":
+							_human.play_once("death", 0.05)
+						"getup":
+							_human.play_getup()
+						"punch":
+							_human.play_once("punch" if randf() < 0.5 else "punch2")
+						_:
+							_human.play_once(anim, 0.02)
 			else:
 				_human.play(anim)
+			_last_anim = anim
 
 	func _process(delta: float) -> void:
 		var k := 1.0 - exp(-10.0 * delta)

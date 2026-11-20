@@ -10,7 +10,7 @@ Doppio clic su `Gioca.bat`, oppure `godot --path .`
 | Tasto | A piedi | In auto |
 |---|---|---|
 | WASD | muoversi | accelera, frena/retromarcia, sterza |
-| Shift | correre | |
+| Shift | correre | derapata alla Mario Kart (tieni Shift e sterza; lasciandola, scatto in avanti; joypad B) |
 | Ctrl | accovacciarsi | |
 | Q | rotolare (mentre ci si muove) | |
 | Spazio | saltare (anche per uscire dal Tevere) | freno a mano |
@@ -21,7 +21,7 @@ Doppio clic su `Gioca.bat`, oppure `godot --path .`
 | 1–7 | scorciatoie: 1 corpo a corpo, 2 pistola, 3 mitragliatrice, 4 fucili, 5 cecchino, 6 lanciarazzi, 7 granate/mine/TNT | |
 | B | far saltare le cariche di TNT | |
 | E | comprare al bancone di un locale, o dal fornitore | |
-| F | salire su un'auto parcheggiata | scendere |
+| F | salire su un'auto (parcheggiata, o del traffico e dell'autobus: tiri fuori chi guida) | scendere |
 | G | | clacson |
 | M | mappa grande (rotella zoom, trascina, clic destro = segnalino) | |
 | H | tornare al punto di partenza | |
@@ -152,6 +152,34 @@ pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
   accese).
 - `landmarks.gd` → `_maxxi()`: il MAXXI di Zaha Hadid fatto a mano (nastri curvi di cemento, galleria a sbalzo con
   vetrata nera, travi sul tetto); i palazzi generici del suo lotto non vengono costruiti (`in_maxxi`).
+
+## Botte, guida, furti, viadotti
+
+- **Passanti colpiti** (`npc.gd`, `Pedestrian._react`): barcollano (si girano verso il colpo, testa o petto), a una
+  mazzata o al terzo pugno vanno a terra e si rialzano (caduta all'indietro, `Human.play_getup`); circa un uomo su
+  tre (`fighter`) risponde a pugni finché non scappi o passano 20 s. I commessi hanno la loro reazione (rapina).
+  In rete le copie ricevono `hit_head`, `knock`, `getup`, `punch` (una volta per cambio).
+- **Guida** (`car.gd`, `_handling`): imbardata e scivolamento decisi dal gioco (impulsi), con fisica vera sotto.
+  Un colpo di sterzo resta in una curva sicura (`LAT_MAX`); tenendo lo sterzo a fondo l'angolo cresce fino al
+  massimo (sterzata brusca). Oltre l'aderenza delle gomme (`grip_lat`) il muso smette di girare e l'auto scivola
+  fuori; oltre la soglia di ribaltamento (`tip_lat`, che cala con la velocità: SUV 9,5, auto 12, sportive 16,
+  autobus 5,5 m/s²) le ruote interne si sollevano e, esagerando, ci si cappotta. In città a tutto sterzo ci si
+  inclina e si scivola; a 100 km/h si rotola. **Derapata alla Mario Kart** con Shift (joypad B): si entra nel
+  verso in cui si sterza, la velocità si conserva, il retro scivola fuori di ~20-30°, sterzo nello stesso verso =
+  curva stretta, opposto = larga; lasciando Shift dopo più di 0,6 s spinta (mini-turbo). Anche in derapata, troppo
+  stretta e troppo veloce, si rischia di ribaltarsi (soprattutto all'uscita, quando le gomme riprendono). Non
+  assegnare `linear_velocity` a un VehicleBody: annulla la spinta del motore. Prove: `--drive=go --hilltest=x,z,gradi
+  --press=move_left@t0-t1,sprint@t0-t1 [--v0=km/h]` (stampa velocità, traverso, rotazione, inclinazione, rischio).
+  Suoni nuovi in `gen_sounds.py`: `skid`, `door_open`, `door_close`.
+- **Autobus rubabili**: dal traffico come le auto; diventano `Car` con `_setup_bus` (11 t, ~72 km/h, niente
+  derapata, camera più alta e lontana). Si entra dalla porta anteriore.
+- **Salire in auto** (`carjack.gd`, `CarJack`): va alla portiera, la apre, tira fuori chi guida (cade, si rialza,
+  scappa), sale e richiude (~1,6 s; `Player.cutscene`). Le portiere sono pannelli aggiunti per la scena.
+- **Corso di Francia**: corsie e marciapiedi paralleli di uno stesso viadotto legati di traverso nel calcolo delle
+  quote (`convert_osm.py`, le rampe strette restano libere); impalcati in calcestruzzo e piloni ogni 24 m dove
+  sono alti da terra e non c'è una strada sotto (`city_builder.gd`).
+- Prove: `--punchtest [--pshots=cartella]` (pugni, a terra, rialzo, risposta), `--furtotest[=bus] [--pshots=…]`
+  (furto con le foto delle fasi, poi gas), `--pos=x,z,quota` (terzo numero facoltativo: quota assoluta).
 
 ## Case
 

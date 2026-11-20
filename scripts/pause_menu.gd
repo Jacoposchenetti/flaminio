@@ -13,7 +13,7 @@ WASD muoviti · Shift corri · Ctrl accovacciati · Q capriola · Spazio salta
 Mouse camera · rotella zoom · tasto destro mira · sinistro spara · R ricarica
 1-7 o Tab armi · B fa esplodere la TNT · E negozio · F sali/scendi dall'auto · G clacson
 M mappa · H ritorno · C personaggio · T chat (/nome NuovoNome) · Esc o P questo menu
-In auto: W gas · S freno/retromarcia · A/D sterza · Spazio freno a mano
+In auto: W gas · S freno/retromarcia · A/D sterza · Shift derapata · Spazio freno a mano
 Elicottero: Spazio sale · Ctrl scende · WASD vola · Shift veloce · sinistro mitra · destro o R razzi
 Jetpack: in aria tieni Spazio · Ctrl scende · J lo togli/rimetti · E davanti alla slot machine: gioca
 Clan: U pannello del clan (anche i sicari) · N chiama i rinforzi · E davanti a un boss: parlaci · K (creativa) elicottero
@@ -25,7 +25,7 @@ Levetta sinistra muoviti · clic levetta sinistra (L3) corri · levetta destra c
 A/Croce salta · B/Cerchio capriola · X/Quadrato ricarica · Y/Triangolo auto
 LT/L2 mira · RT/R2 spara · LB/L1 accovacciati · RB/R1 arma successiva · R3 clacson
 Croce: su negozio · giù TNT · sinistra ritorno · destra mappa · Start menu · Back/Share mappa
-In auto: RT gas · LT freno/retromarcia · A freno a mano
+In auto: RT gas · LT freno/retromarcia · B derapata · A freno a mano
 Elicottero: RT sale · LT scende · LB mitra · X razzi · Jetpack: in aria tieni A"""
 
 var _box: VBoxContainer

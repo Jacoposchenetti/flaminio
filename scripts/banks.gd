@@ -482,9 +482,11 @@ func _clerk(b: Dictionary, at: Vector3, face: float, shop: Dictionary, director:
 
 func _dismiss(b: Dictionary) -> void:
 	for key: String in ["staff", "guards"]:
-		for n: Node in b[key]:
-			if is_instance_valid(n) and (n.get("state") in [null, "idle"] or n.get("dead") == true):
-				n.queue_free()
+		for item: Variant in b[key]:  # Variant: un impiegato può essere già stato liberato
+			if is_instance_valid(item):
+				var n := item as Node
+				if n.get("state") in [null, "idle"] or n.get("dead") == true:
+					n.queue_free()
 		b[key] = []
 
 

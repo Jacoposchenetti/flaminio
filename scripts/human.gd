@@ -18,8 +18,8 @@ const ANIM_MAP := {
 	"swim": "Swim_Fwd", "swim_idle": "Swim_Idle", "drive": "Driving", "talk": "Idle_Talking", "dance": "Dance",
 	"crouch": "Crouch_Idle", "crouch_walk": "Crouch_Fwd", "roll": "Roll", "punch": "Punch_Jab", "punch2": "Punch_Cross",
 	"melee": "Sword_Attack", "aim": "Pistol_Aim_Neutral", "aim_up": "Pistol_Aim_Up", "aim_down": "Pistol_Aim_Down",
-	"armed": "Pistol_Idle", "shoot": "Pistol_Shoot", "reload": "Pistol_Reload", "death": "Death01", "hit": "Hit_Chest",
-	"throw": "Spell_Simple_Shoot", "interact": "Interact", "kick": "Punch_Cross", "push": "Push",
+	"armed": "Pistol_Idle", "shoot": "Pistol_Shoot", "reload": "Pistol_Reload", "death": "Death01", "hit": "Hit_Chest", "hit_head": "Hit_Head",
+	"throw": "Spell_Simple_Shoot", "interact": "Interact", "kick": "Punch_Cross", "push": "Push", "sit_enter": "Sitting_Enter",
 }
 const SKIN := {
 	"chiara": Color(0.93, 0.76, 0.64), "olivastra": Color(0.8, 0.6, 0.45), "ambrata": Color(0.66, 0.46, 0.32),
@@ -161,13 +161,21 @@ func play(want: String, blend := 0.2) -> void:
 	_current = real
 
 
+## Si rialza da terra: la caduta (Death01) all'indietro, un po' più veloce.
+func play_getup() -> void:
+	if anim == null or not anim.has_animation("Death01"):
+		return
+	anim.play("Death01", 0.1, -1.7, true)
+	_current = "Death01_up"
+
+
 ## Rilancia da capo un'animazione breve (colpo, sparo, ricarica).
-func play_once(want: String, blend := 0.08) -> void:
+func play_once(want: String, blend := 0.08, speed := 1.0) -> void:
 	var real: String = ANIM_MAP.get(want, want)
 	if anim == null or not anim.has_animation(real):
 		return
 	anim.stop()
-	anim.play(real, blend)
+	anim.play(real, blend, speed)
 	_current = real
 
 

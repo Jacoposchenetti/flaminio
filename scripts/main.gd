@@ -85,6 +85,7 @@ var missions: Missions
 var homes: Homes
 var _home_ui: HomeUI
 var _missions_done: Array = []
+var _jack_run: CarJack  # sequenza in corso del salire in auto
 var _known_bosses: Array = []  # nomi dei boss incontrati di persona: solo questi (e il tuo) stanno sulla mappa
 var _boss_scan := 0.0
 var bank_balance := 0  # conto corrente di chi gioca su questo PC (salvato nelle impostazioni)
@@ -786,7 +787,8 @@ func _start_playing() -> void:
 		var xz: PackedStringArray = _args["pos"].split(",")
 		var x := float(xz[0])
 		var z := float(xz[1])
-		player.teleport(Vector3(x, city.surface_at(x, z) + 1.0, z))
+		# Terzo numero (facoltativo): quota assoluta, per stare su un viadotto o guardare dall'alto.
+		player.teleport(Vector3(x, float(xz[2]) if xz.size() > 2 else city.surface_at(x, z) + 1.0, z))
 	if _args.has("yaw"):
 		player.cam_yaw = deg_to_rad(float(_args["yaw"]))
 	if _args.has("pitch"):
@@ -1087,12 +1089,17 @@ func _nearest_traffic(max_dist: float) -> Array:
 	for n: Node in cands:
 		var ok := false
 		if n is Traffic.TrafficCar:
-			ok = not (n as Traffic.TrafficCar).destroyed and not (n as Traffic.TrafficCar).is_bus
+			ok = not (n as Traffic.TrafficCar).destroyed
 		elif n is NetSync.VehiclePuppet:
-			ok = not (n as NetSync.VehiclePuppet).police and not n.get("_destroyed") and int(n.get("look")) < Bus.LOOK
+			ok = not (n as NetSync.VehiclePuppet).police and not n.get("_destroyed")
 		if not ok:
 			continue
 		var d := (n as Node3D).global_position.distance_to(player.global_position)
+		if int(n.get("look")) >= Bus.LOOK:
+			# Autobus: conta la distanza dal fianco, non dal centro (è lungo 12 m).
+			var lp := (n as Node3D).global_transform.affine_inverse() * player.global_position
+			var half := Bus.SIZE * 0.5
+			d = Vector2(maxf(absf(lp.x) - half.x, 0.0), maxf(absf(lp.z) - half.z, 0.0)).length() + 1.2
 		if d < best_d:
 			best_d = d
 			best = [n, int(n.get("nid")), int(n.get("look"))]
@@ -1107,25 +1114,33 @@ func _jack(t: Array) -> void:
 	_jack_n += 1
 	var id := JACK_BASE + (_my_peer() % 1000) * 1000 + _jack_n % 1000
 	var car := _make_jacked_car(id, int(t[2]), xf)
-	var door := xf * Vector3(2.4, 0.1, 0.2)  # lato guidatore, un passo fuori dalla portiera
+	var bus := int(t[2]) >= Bus.LOOK
+	# Lato guidatore, un passo fuori dalla portiera (autobus: dalla porta anteriore, a destra).
+	var door := xf * (Vector3(-2.3, 0.1, Bus.SIZE.z * 0.5 - 0.9) if bus else Vector3(2.4, 0.1, 0.2))
+	var driver: Pedestrians.Pedestrian = null
 	if simulate:
-		_remove_traffic(int(t[1]), door, player.global_position)
+		# Il guidatore resta al volante: lo tira fuori la scena (CarJack).
+		var n: Node = _registry.get(int(t[1]))
+		if n and is_instance_valid(n):
+			n.queue_free()
+		driver = pedestrians.spawn_at(xf * car.seat.origin)
 	elif _online_now():
 		net_jacked.rpc_id(1, int(t[1]), door)
 	if _online_now():
 		net_car_spawn.rpc(id, int(t[2]), xf)
 	_on_local_crime("theft", xf.origin)
 	car.driver_peer = _my_peer()
-	player.enter_car(car)
 	if _online_now():
 		car_claim.rpc(car.car_id, car.driver_peer)
-	Sfx.play3d("hurt", door + Vector3(0, 1, 0), -2.0)
+	_jack_run = CarJack.run(self, player, car, driver)
 
 
 func _make_jacked_car(id: int, look: int, xf: Transform3D) -> Car:
 	if _extra_cars.has(id):
 		return _extra_cars[id]
 	var model: String = Car.MODELS[(look % 16) % Car.MODELS.size()]
+	if look >= Bus.LOOK:
+		model = "bus%d" % (look - Bus.LOOK)  # autobus rubato
 	var car := Car.new().setup(id, model, Car.PAINTS[(look / 16) % Car.PAINTS.size()])
 	car.combat = combat
 	car.on_destroyed = _on_car_destroyed
@@ -1181,6 +1196,8 @@ func _nearest_car(max_dist: float, only_free: bool) -> Car:
 
 
 func _toggle_car() -> void:
+	if _jack_run and is_instance_valid(_jack_run):
+		return  # sta già salendo
 	if player.vehicle:
 		_leave_car()
 		return
@@ -1207,7 +1224,10 @@ func _toggle_car() -> void:
 			_system("Quest'auto la sta guidando %s." % _names.get(busy.driver_peer, "qualcun altro"))
 		return
 	car.driver_peer = _my_peer()
-	player.enter_car(car)
+	if car is Heli:
+		player.enter_car(car)
+	else:
+		_jack_run = CarJack.run(self, player, car, null)  # apre la portiera, sale, richiude
 	if _online_now():
 		car_claim.rpc(car.car_id, car.driver_peer)
 
@@ -1587,7 +1607,8 @@ func _process(delta: float) -> void:
 			_hint.text = ("F scendi · Spazio/Ctrl su-giù · WASD vola · Shift veloce · clic sx mitra · dx o R razzi"
 				if (player.vehicle as Heli).rpm > 0.9 else "Il rotore prende giri… (F scendi)")
 		elif player.vehicle:
-			_hint.text = "F / Y scendi · Spazio / A freno a mano · clic sinistro / LB spara"
+			_hint.text = ("F / Y scendi · Spazio / A freno a mano · clic sinistro / LB spara" if player.vehicle.model.begins_with("bus")
+				else "F / Y scendi · Shift / B derapata · Spazio / A freno a mano · clic sinistro / LB spara")
 		elif player.scooter >= 0:
 			_hint.text = "W / RT avanti · S / LT frena · A-D sterza · clic sinistro / LB spara · F / Y scendi"
 		elif scooters.nearest(player.global_position, 2.2):
@@ -1684,6 +1705,8 @@ func _process(delta: float) -> void:
 			_toggle_car()
 			if _args["drive"] == "go":
 				Input.action_press("move_forward")
+			if _args.has("v0"):  # prova: --v0=km/h, l'auto parte già lanciata (quando il guidatore è al volante)
+				c.set_meta("v0", float(_args["v0"]) / 3.6)
 	if player and police and _args.has("wanted") and not player.dead:
 		# Prova: --wanted=n tiene il giocatore ricercato con n stelle.
 		police.wanted[_my_peer()] = int(_args["wanted"])
@@ -1764,6 +1787,10 @@ func _process(delta: float) -> void:
 		_bank_test()
 	if player and _args.has("clantest"):
 		_clan_test()
+	if player and _args.has("punchtest"):
+		_punch_test()
+	if player and _args.has("furtotest"):
+		_steal_test()
 	if player and _args.has("threattest"):
 		# Prova: rabbia dei clan sulla HUD, boss scoperti sulla mappa, vita dell'elicottero che torna.
 		if _ct_step == 0 and _time > 3.0:
@@ -1813,9 +1840,16 @@ func _process(delta: float) -> void:
 		_args["helishot_done"] = true
 		var hs := String(_args["helishot"])
 		get_viewport().get_texture().get_image().save_png(hs.substr(hs.find(":") + 1))
-	if player and _args.has("drive") and player.vehicle and _frame % 60 == 0:
+	if player and player.vehicle and player.vehicle.has_meta("v0"):
+		player.vehicle.linear_velocity = player.vehicle.global_basis.z * float(player.vehicle.get_meta("v0"))
+		player.vehicle.remove_meta("v0")
+	if player and _args.has("drive") and player.vehicle and _frame % 30 == 0:
 		var v := player.vehicle
-		print("guida: pos %s  quota terreno %.1f  velocità %.0f km/h" % [v.global_position.round(), city.surface_at(v.global_position.x, v.global_position.z), v.linear_velocity.length() * 3.6])
+		print("guida t=%.1f: pos %s  quota terreno %.1f  velocità %.0f km/h  traverso %.1f m/s  rotazione %.0f°/s  derapa %s" % [_time, v.global_position.round(), city.surface_at(v.global_position.x, v.global_position.z), v.linear_velocity.length() * 3.6,
+			v.linear_velocity.dot(v.global_basis.x), rad_to_deg(v.angular_velocity.y), v.get("drifting")])
+		print("  inclinazione %.0f°  rischio %.2f" % [rad_to_deg(acos(clampf(v.global_basis.y.dot(Vector3.UP), -1.0, 1.0))), float(v.get("roll_risk"))])
+		if _args.has("drivedebug"):
+			print("  motore %.0f freno %.1f gas %s sterzo %.2f a terra %s" % [v.engine_force, v.brake, Input.is_action_pressed("move_forward"), v.steering, (v.get_child(3) as VehicleWheel3D).is_in_contact() if v.get_child(3) is VehicleWheel3D else "?"])
 	if _args.has("say") and _time > 8.0 and _online_now() and not _args.has("said"):
 		_args["said"] = true  # prova automatica della chat
 		_on_chat_submitted(_args["say"])
@@ -2299,6 +2333,12 @@ func _jack_test() -> void:
 				_jack_step = 1
 		1:
 			_toggle_car()
+			_jack_ref.append(_time)
+			_jack_step = 10
+		10:
+			# Salire (portiera, guidatore tirato fuori) dura un paio di secondi: CarJack.
+			if player.vehicle == null and _time < float(_jack_ref[2]) + 4.0:
+				return
 			print("furto: alla guida = %s, auto rubata = %s, auto del traffico %d -> %d, pedoni %d -> %d" % [
 				player.vehicle != null, player.vehicle != null and player.vehicle.car_id >= JACK_BASE,
 				_jack_ref[0], traffic.get_child_count(), _jack_ref[1], pedestrians.get_child_count()])
@@ -3729,3 +3769,79 @@ func _wheel_pick(id: String) -> void:
 	if id != "" and player.owned_weapons().has(id):
 		player.weapon = id
 		_system("In mano: " + String(Weapons.info(id)["name"]) + (" (B per farla saltare)" if id == "tnt" else ""))
+
+
+## Prova: --punchtest. Un passante tosto davanti al giocatore: tre pugni (barcolla, poi a terra), si rialza e
+## risponde; poi una mazzata. Stampa lo stato; con --capture si vede la scena.
+var _pt_ped: Pedestrians.Pedestrian
+var _pt_step := 0
+func _punch_test() -> void:
+	var t := _time
+	if _pt_step == 0 and t > 2.0:
+		_pt_step = 1
+		var front := player.global_position + Vector3(1.6, 0, -2.2)
+		_pt_ped = pedestrians.spawn_at(front)
+		_pt_ped.fighter = true
+		player.cam_yaw = 0.0
+		print("pugni: passante creato ", _pt_ped != null, " t=", t)
+	if _pt_ped == null or not is_instance_valid(_pt_ped):
+		return
+	var hit := func(dmg: float) -> void:
+		_pt_ped.take_damage(dmg, _my_peer(), _pt_ped.global_position + Vector3(0, 1.4, 0))
+	for k: Array in [[1, 2.6, 12.0], [2, 3.4, 12.0], [3, 4.2, 12.0], [4, 9.5, 30.0]]:
+		if _pt_step == k[0] and t > k[1]:
+			_pt_step += 1
+			hit.call(k[2])
+	# --pshots=cartella: fotografa i momenti salienti (barcolla, a terra, si rialza, risponde).
+	if _args.has("pshots"):
+		for m: Array in [["1_barcolla", 2.8], ["2_testa", 3.55], ["3_a_terra", 4.9], ["4_rialzo", 7.3], ["5_risponde", 9.3]]:
+			if t > float(m[1]) and not _args.has("ps_" + String(m[0])):
+				_args["ps_" + String(m[0])] = true
+				get_viewport().get_texture().get_image().save_png("%s/%s.png" % [_args["pshots"], m[0]])
+	if _frame % 15 == 0 and _pt_step >= 2:
+		print("pugni t=%.1f: vita %d, stun %.1f, a terra %.1f, rialzo %.1f, risponde %s, anim %s, vita giocatore %d" % [
+			t, int(_pt_ped.health), _pt_ped._r_stun, _pt_ped._r_down, _pt_ped._r_getup, _pt_ped._r_foe > 0, _pt_ped.net_anim, int(player.health)])
+
+
+## Prova: --furtotest (auto del traffico) o --furtotest=bus. Il giocatore accanto alla portiera preme F; con
+## --pshots=cartella fotografa le fasi (va alla portiera, apre, tira fuori il guidatore, sale, richiude).
+var _jt_t0 := -1.0
+func _steal_test() -> void:
+	if _jt_t0 < 0.0 and _time > 4.0:
+		var want_bus := String(_args["furtotest"]) == "bus"
+		var best: Traffic.TrafficCar = null
+		for n: Node in traffic.get_children():
+			var tc := n as Traffic.TrafficCar
+			if tc and tc.is_bus == want_bus and not tc.destroyed and (best == null or
+					tc.global_position.distance_to(player.global_position) < best.global_position.distance_to(player.global_position)):
+				best = tc
+		if best == null:
+			return
+		var xf := best.global_transform
+		var at := xf * (Vector3(-2.6, 0, Bus.SIZE.z * 0.5 - 1.6) if want_bus else Vector3(2.6, 0, -0.6))
+		player.teleport(Vector3(at.x, city.surface_at(at.x, at.z) + 0.2, at.z))
+		player.cam_yaw = best.global_rotation.y + (-PI * 0.5 if want_bus else PI * 0.5) + 0.5
+		player.cam_pitch = -0.25
+		_jt_t0 = _time
+		_toggle_car()
+		print("furto: avviato su %s, sequenza %s" % ["autobus" if want_bus else "auto", _jack_run != null])
+	if _jt_t0 < 0.0:
+		return
+	var dt := _time - _jt_t0
+	if _args.has("pshots"):
+		for m: Array in [["1_va", 0.25], ["2_apre", 0.65], ["3_tira", 1.1], ["4_sale", 1.6], ["5_chiude", 1.95], ["6_dentro", 3.0]]:
+			if dt > float(m[1]) and not _args.has("js_" + String(m[0])):
+				_args["js_" + String(m[0])] = true
+				get_viewport().get_texture().get_image().save_png("%s/%s.png" % [_args["pshots"], m[0]])
+	if dt > 3.2 and dt < 7.0 and player.vehicle:
+		Input.action_press("move_forward")
+	elif dt >= 7.0:
+		Input.action_release("move_forward")
+	if dt > 6.8 and not _args.has("jt_speed"):
+		_args["jt_speed"] = true
+		print("furto: dopo 3,5 s di gas %.0f km/h" % player.vehicle.speed_kmh())
+		if _args.has("pshots"):
+			get_viewport().get_texture().get_image().save_png("%s/7_guida.png" % _args["pshots"])
+	if dt > 3.2 and not _args.has("jt_done"):
+		_args["jt_done"] = true
+		print("furto: al volante %s (%s), scena finita %s" % [player.vehicle != null, player.vehicle.model if player.vehicle else "-", not is_instance_valid(_jack_run)])

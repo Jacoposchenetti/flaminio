@@ -50,6 +50,7 @@ var hurt_remote: Callable  # func(peer, quantità, chi colpisce): danno a un gio
 var combat: Combat
 var camera: Camera3D
 var vehicle: Car  # auto guidata da questo giocatore (solo locale)
+var cutscene := false  # sta salendo in auto (CarJack): il movimento lo decide la scena
 
 # Stato di gioco.
 var health := MAX_HEALTH
@@ -468,6 +469,20 @@ func _update_weapon_model() -> void:
 # --- Auto ---------------------------------------------------------------------------------------
 
 
+## Posa durante una scena (CarJack): posizione, direzione e animazione (once: da capo, a velocità speed).
+func cutscene_pose(pos: Vector3, yaw: float, anim: String, once := false, speed := 1.0) -> void:
+	global_position = pos
+	velocity = Vector3.ZERO
+	_model.rotation.y = yaw
+	if anim == "":
+		return
+	if once:
+		_human.play_once(anim, 0.12, speed)
+		_current = anim
+	else:
+		_play(anim)
+
+
 func enter_car(car: Car) -> void:
 	_set_jet(false)
 	vehicle = car
@@ -718,6 +733,8 @@ func _physics_process(delta: float) -> void:
 		_puppet_update(delta)
 		_update_weapon_model()
 		return
+	if cutscene:
+		return  # lo muove CarJack (sale in auto)
 	hurt_flash = maxf(0.0, hurt_flash - delta * 1.5)
 	_since_hit += delta
 	if not dead and _since_hit > REGEN_DELAY and health < REGEN_CAP:
@@ -737,6 +754,7 @@ func _physics_process(delta: float) -> void:
 			Input.get_axis("move_back", "move_forward")
 			+ Input.get_action_strength("accelerate") - Input.get_action_strength("brake"), -1.0, 1.0)
 		var steer := 0.0 if blocked else Input.get_axis("move_right", "move_left")
+		vehicle.drift_input = not blocked and (Input.is_action_pressed("sprint") or Input.is_action_pressed("roll"))  # Shift / B: derapata
 		vehicle.drive(throttle, steer, not blocked and Input.is_action_pressed("jump"), delta)
 		_show_jetpack(has_jetpack and jet_worn, false)
 		global_transform = _seat_transform(vehicle)
@@ -876,6 +894,9 @@ func _process(delta: float) -> void:
 		target_len = 7.5
 		if vehicle is Heli:
 			head = vehicle.global_position + Vector3(0, 2.6, 0)
+			target_len = 15.0
+		elif vehicle.model.begins_with("bus"):
+			head = vehicle.global_position + Vector3(0, 4.2, 0)  # l'autobus è lungo 12 m e alto 3
 			target_len = 15.0
 		if Time.get_ticks_msec() / 1000.0 - _last_mouse > 1.2 and vehicle.linear_velocity.length() > 2.0:
 			cam_yaw = lerp_angle(cam_yaw, vehicle.global_rotation.y + PI, 1.0 - exp(-2.5 * delta))

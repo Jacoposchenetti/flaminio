@@ -7,7 +7,7 @@ extends RefCounted
 const GUN := {
 	"pistola": "pistol", "mitragliatrice": "smg", "fucile": "rifle", "pompa": "shotgun", "cecchino": "sniper", "heli_mg": "rifle",
 }
-const LOOPS := ["engine", "siren", "ambience", "rotor", "jet", "spin"]
+const LOOPS := ["engine", "siren", "ambience", "rotor", "jet", "spin", "skid"]
 
 static var _cache := {}
 static var root: Node  # dove aggiungere i suoni (la scena principale)

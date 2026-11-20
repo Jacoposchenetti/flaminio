@@ -621,6 +621,31 @@ func _build_roads() -> void:
 	bridge_body.collision_layer = 1
 	add_child(bridge_body)
 	var lamp_side := 1.0
+	# Viadotti: calcestruzzo liscio grigio chiaro e piloni dove l'impalcato è alto da terra (non in mezzo alle
+	# strade che passano sotto: per saperlo, una griglia a celle di 4 m delle carreggiate a terra).
+	var deck_mat := StandardMaterial3D.new()
+	deck_mat.albedo_texture = TexLib.tex("Concrete034", "color")
+	deck_mat.albedo_color = Color(0.78, 0.78, 0.76)
+	deck_mat.normal_enabled = true
+	deck_mat.normal_texture = TexLib.tex("Concrete034", "normal")
+	deck_mat.normal_scale = 0.4
+	deck_mat.uv1_triplanar = true
+	deck_mat.uv1_scale = Vector3(0.12, 0.12, 0.12)
+	deck_mat.roughness = 0.85
+	var road_cells := {}
+	for r: Dictionary in data["roads"]:
+		if int(r["b"]) == 1 or r["k"] == "foot":
+			continue
+		var rp := _pts(r["p"])
+		var hw := float(r["w"]) * 0.5 + 1.5
+		for i in range(1, rp.size()):
+			var n := int(rp[i - 1].distance_to(rp[i]) / 2.0) + 1
+			for k in n + 1:
+				var q := rp[i - 1].lerp(rp[i], float(k) / n)
+				for ox in range(floori((q.x - hw) / 4.0), floori((q.x + hw) / 4.0) + 1):
+					for oz in range(floori((q.y - hw) / 4.0), floori((q.y + hw) / 4.0) + 1):
+						road_cells[Vector2i(ox, oz)] = true
+	var pillars: Array[Transform3D] = []
 	for r: Dictionary in data["roads"]:
 		var pts := _pts(r["p"])
 		var count := pts.size()
@@ -671,6 +696,7 @@ func _build_roads() -> void:
 		var prev_r := Vector3.ZERO
 		var prev_u := 0.0
 		var lamp_next := 14.0
+		var pillar_next := 10.0
 		for i in count:
 			var p := pts[i]
 			var d_in := (p - pts[i - 1]).normalized() if i > 0 else Vector2.ZERO
@@ -720,7 +746,23 @@ func _build_roads() -> void:
 				if is_bridge and not on_bridge((a + p) * 0.5):
 					var ya := float(deck[i - 1]) if not deck.is_empty() else 0.0
 					var yb := float(deck[i]) if not deck.is_empty() else 0.0
-					_bridge_segment(bridge_body, Vector3(a.x, ya, a.y), Vector3(p.x, yb, p.y), w, _stone_mat)
+					_bridge_segment(bridge_body, Vector3(a.x, ya, a.y), Vector3(p.x, yb, p.y), w, deck_mat)
+					while kind != "foot" and pillar_next < u:
+						var s := pillar_next - (u - length)
+						pillar_next += 24.0
+						if s < 0.0:
+							continue
+						var t := s / length
+						var q := a.lerp(p, t)
+						var under := lerpf(ya, yb, t) - 1.15  # sotto l'impalcato
+						var g := height_at(q.x, q.y)
+						if under - g < 3.0 or over_river(q.x, q.y) or road_cells.has(Vector2i(floori(q.x / 4.0), floori(q.y / 4.0))):
+							continue
+						var side := Vector2(-(p - a).y, (p - a).x).normalized() * w * 0.28
+						for sg: float in [1.0, -1.0]:
+							var c2 := q + side * sg
+							var hgt := under - g + 0.5
+							pillars.append(Transform3D(Basis().scaled(Vector3(1, hgt, 1)), Vector3(c2.x, g - 0.5 + hgt * 0.5, c2.y)))
 				elif kind == "road" and w >= 6.0 and length > 0.5:
 					var s0 := maxf(0.0, 1.0 - dp[i - 1])
 					var s1 := minf(length, length - maxf(0.0, 1.0 - dn[i]))
@@ -766,6 +808,31 @@ func _build_roads() -> void:
 					_names[key] = []
 				_names[key].append([pts[i - 1], p, r["n"]])
 	_add_mesh(acc.mesh(_road_material()), "Strade", false)
+	if not pillars.is_empty():
+		var cyl := CylinderMesh.new()
+		cyl.top_radius = 0.6
+		cyl.bottom_radius = 0.6
+		cyl.height = 1.0
+		cyl.radial_segments = 12
+		cyl.rings = 1
+		cyl.material = deck_mat
+		var mm := MultiMesh.new()
+		mm.transform_format = MultiMesh.TRANSFORM_3D
+		mm.mesh = cyl
+		mm.instance_count = pillars.size()
+		for i in pillars.size():
+			mm.set_instance_transform(i, pillars[i])
+			var cs := CollisionShape3D.new()
+			var sh := CylinderShape3D.new()
+			sh.radius = 0.6
+			sh.height = pillars[i].basis.get_scale().y
+			cs.shape = sh
+			cs.position = pillars[i].origin
+			bridge_body.add_child(cs)
+		var mmi := MultiMeshInstance3D.new()
+		mmi.name = "PiloniViadotti"
+		mmi.multimesh = mm
+		add_child(mmi)
 	if "--timing" in OS.get_cmdline_user_args():
 		print("  triangoli: strade %d, cordoli %d" % [acc.v.size() / 3, curbs.v.size() / 3])
 	_add_mesh(curbs.mesh(_stone_mat), "Cordoli", false)
