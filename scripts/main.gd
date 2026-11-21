@@ -789,6 +789,15 @@ func _start_playing() -> void:
 		var z := float(xz[1])
 		# Terzo numero (facoltativo): quota assoluta, per stare su un viadotto o guardare dall'alto.
 		player.teleport(Vector3(x, float(xz[2]) if xz.size() > 2 else city.surface_at(x, z) + 1.0, z))
+	if _args.has("civico") and not city.civic_spots.is_empty():
+		# Prova: --civico=n davanti alla targa n (a 4 m, guardandola).
+		var cs: Array = city.civic_spots[int(_args["civico"]) % city.civic_spots.size()]
+		var stand: Vector3 = cs[0] + (cs[1] as Vector3) * 4.0
+		player.teleport(Vector3(stand.x, city.surface_at(stand.x, stand.z) + 0.2, stand.z))
+		var look: Vector3 = -(cs[1] as Vector3)
+		player.cam_yaw = atan2(-look.x, -look.z) + 0.35
+		player.cam_pitch = 0.05
+		print("civico: %s %s" % [cs[3], cs[2]])
 	if _args.has("yaw"):
 		player.cam_yaw = deg_to_rad(float(_args["yaw"]))
 	if _args.has("pitch"):

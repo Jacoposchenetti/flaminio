@@ -181,6 +181,15 @@ pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
 - Prove: `--punchtest [--pshots=cartella]` (pugni, a terra, rialzo, risposta), `--furtotest[=bus] [--pshots=…]`
   (furto con le foto delle fasi, poi gas), `--pos=x,z,quota` (terzo numero facoltativo: quota assoluta).
 
+## Palazzi a livello della strada e numeri civici
+
+- Il piano terra di ogni palazzo sta alla quota della strada (carreggiata o marciapiede) più alta che lo tocca: prima
+  poteva finire sotto la via, con le vetrine mezze interrate. Sul lato in discesa il muro scende fino a terra.
+  (`city_builder.gd`, `street_cells`: celle di 4 m delle strade a terra, usate anche per i piloni dei viadotti.)
+- **Civici**: `python tools/fetch_civici.py` scarica da OpenStreetMap gli indirizzi (`addr:housenumber`) e scrive
+  `data/civici.json`; il gioco mette una targa di marmo col numero nero sulla facciata più vicina, accanto al
+  portone (`_build_civici`, ~1700 targhe, visibili entro 30 m). Prova: `--civico=n` davanti alla targa n.
+
 ## Case
 
 - `scripts/homes.gd` (`Homes`): 16 case scelte nei palazzi veri (due per zona, portone sul lato verso la strada),

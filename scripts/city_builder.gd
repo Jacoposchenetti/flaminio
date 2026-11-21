@@ -38,6 +38,9 @@ var parking: Array[Transform3D] = []  # posti auto lungo i cordoli (davanti dell
 var _stone_mat: StandardMaterial3D
 var water_y := -10.5  # pelo dell'acqua del Tevere (da city.json)
 var _bridge_polys: Array[PackedVector2Array] = []
+var street_cells := {}
+var civic_spots: Array = []  # [posizione della targa, normale, numero, via] (prova --civico=n)
+var _facades := {}  # cella di 32 m -> [[lati del palazzo, quota del piano terra, centro], ...]  # Vector2i(cella di 4 m) -> 2 carreggiata, 1 marciapiede (vedi _build_roads)
 var venues: Array = []  # locali (bar, farmacie, armerie) con l'interno: vedi venues.gd
 var lamp_points := PackedVector3Array()  # dove sta la lampada di ogni lampione (per le luci di notte)
 var lamp_glass: StandardMaterial3D  # vetro dei lampioni: si accende di notte
@@ -137,7 +140,7 @@ func build() -> void:
 	_stone_mat.uv1_triplanar = true
 	_stone_mat.uv1_scale = Vector3(0.4, 0.4, 0.4)
 	_stone_mat.roughness = 0.8
-	var steps := [_build_terrain, _build_areas, _build_roads, _build_buildings, _build_landmarks, _build_trees, _build_bounds]
+	var steps := [_build_terrain, _build_areas, _build_roads, _build_buildings, _build_civici, _build_landmarks, _build_trees, _build_bounds]
 	for step: Callable in steps:
 		var ts := Time.get_ticks_msec()
 		step.call()
@@ -632,19 +635,22 @@ func _build_roads() -> void:
 	deck_mat.uv1_triplanar = true
 	deck_mat.uv1_scale = Vector3(0.12, 0.12, 0.12)
 	deck_mat.roughness = 0.85
-	var road_cells := {}
+	# Celle di 4 m occupate da strade a terra: 2 carreggiata, 1 solo marciapiede/vialetto. Servono anche ai palazzi
+	# (piano terra alla quota della via, _build_buildings).
+	var road_cells := street_cells
 	for r: Dictionary in data["roads"]:
-		if int(r["b"]) == 1 or r["k"] == "foot":
+		if int(r["b"]) == 1:
 			continue
+		var mark := 1 if r["k"] == "foot" else 2
 		var rp := _pts(r["p"])
-		var hw := float(r["w"]) * 0.5 + 1.5
+		var hw := float(r["w"]) * 0.5 + (1.0 if mark == 1 else 1.5)
 		for i in range(1, rp.size()):
 			var n := int(rp[i - 1].distance_to(rp[i]) / 2.0) + 1
 			for k in n + 1:
 				var q := rp[i - 1].lerp(rp[i], float(k) / n)
 				for ox in range(floori((q.x - hw) / 4.0), floori((q.x + hw) / 4.0) + 1):
 					for oz in range(floori((q.y - hw) / 4.0), floori((q.y + hw) / 4.0) + 1):
-						road_cells[Vector2i(ox, oz)] = true
+						road_cells[Vector2i(ox, oz)] = maxi(int(road_cells.get(Vector2i(ox, oz), 0)), mark)
 	var pillars: Array[Transform3D] = []
 	for r: Dictionary in data["roads"]:
 		var pts := _pts(r["p"])
@@ -756,7 +762,7 @@ func _build_roads() -> void:
 						var q := a.lerp(p, t)
 						var under := lerpf(ya, yb, t) - 1.15  # sotto l'impalcato
 						var g := height_at(q.x, q.y)
-						if under - g < 3.0 or over_river(q.x, q.y) or road_cells.has(Vector2i(floori(q.x / 4.0), floori(q.y / 4.0))):
+						if under - g < 3.0 or over_river(q.x, q.y) or int(road_cells.get(Vector2i(floori(q.x / 4.0), floori(q.y / 4.0)), 0)) == 2:
 							continue
 						var side := Vector2(-(p - a).y, (p - a).x).normalized() * w * 0.28
 						for sg: float in [1.0, -1.0]:
@@ -1025,6 +1031,22 @@ func _build_buildings() -> void:
 			center += p
 		center /= pts.size()
 		var ground := height_at(center.x, center.y)
+		if not b.has("m"):
+			# Il piano terra sta alla quota della strada più alta che tocca il palazzo (ingresso e negozi sul
+			# marciapiede): prima, appoggiato alla strada più vicina o al terreno, poteva finire sotto il livello della
+			# via con le vetrine mezze interrate. Sul lato in discesa il muro scende fino a terra (foot).
+			var street := -INF
+			for i in pts.size():
+				var e0 := pts[i]
+				var e1 := pts[(i + 1) % pts.size()]
+				var n := int(e0.distance_to(e1) / 4.0) + 1
+				for k in n + 1:
+					var q := e0.lerp(e1, float(k) / n)
+					var o := q + (q - center).normalized() * 3.0
+					if street_cells.has(Vector2i(floori(o.x / 4.0), floori(o.y / 4.0))):
+						street = maxf(street, surface_at(o.x, o.y))
+			if street > ground + 0.3:
+				ground = minf(street, ground + 6.0)
 		var modern := false  # il MAXXI ora è fatto a mano; la vecchia caserma accanto è un palazzo normale
 		var y0 := ground - 0.4 + float(b.get("m", 0.0))
 		var foot := y0  # piede del muro: in discesa scende sotto il piano del palazzo
@@ -1033,6 +1055,12 @@ func _build_buildings() -> void:
 				var o := q + (q - center).normalized() * 1.5
 				foot = minf(foot, minf(height_at(q.x, q.y), surface_at(o.x, o.y)) - 0.4)
 		var y1 := ground + h
+		if not b.has("m") and h > 4.0:
+			# Facciate per i numeri civici (_build_civici): lati, piano terra, centro.
+			var fk := Vector2i(floori(center.x / 32.0), floori(center.y / 32.0))
+			if not _facades.has(fk):
+				_facades[fk] = []
+			_facades[fk].append([pts, ground, center])
 		var tall := h > 6.5 and not modern and not b.has("m")
 		var key := _chunk_key(center)
 		var target := modern_chunks if modern else chunks
@@ -1281,6 +1309,83 @@ func _build_trees() -> void:
 		_add_multimesh_chunks(meshes[kind][1], lists[kind], "Alberi_%s_medi" % kind, TREE_NEAR, NEAR_RANGE, false)
 		_add_multimesh_chunks(TreeKit.shadow_mesh(kind), lists[kind], "Alberi_%s_ombre" % kind, 0.0, NEAR_RANGE, true, true)
 		_add_multimesh_chunks(meshes[kind][2], lists[kind], "Alberi_%s_lontani" % kind, NEAR_RANGE, 0.0, false)
+
+
+## Numeri civici (data/civici.json, da tools/fetch_civici.py): targa di marmo bianco col numero nero, come a
+## Roma, sulla facciata più vicina al punto dell'indirizzo, accanto al portone a circa 2,3 m da terra.
+## Si vedono entro 30 m (sono quasi duemila).
+func _build_civici() -> void:
+	if not FileAccess.file_exists("res://data/civici.json"):
+		return
+	var list: Array = JSON.parse_string(FileAccess.get_file_as_string("res://data/civici.json"))
+	var plates: Array[Transform3D] = []
+	var font_col := Color(0.08, 0.08, 0.09)
+	for cv: Array in list:
+		var at := Vector2(float(cv[0]), float(cv[1]))
+		var best_d := 14.0
+		var best: Array = []
+		var key := Vector2i(floori(at.x / 32.0), floori(at.y / 32.0))
+		for dx in range(-1, 2):
+			for dz in range(-1, 2):
+				for f: Array in _facades.get(key + Vector2i(dx, dz), []):
+					var pts: PackedVector2Array = f[0]
+					for i in pts.size():
+						var a := pts[i]
+						var b := pts[(i + 1) % pts.size()]
+						if a.distance_to(b) < 2.5:
+							continue
+						var q := Geometry2D.get_closest_point_to_segment(at, a, b)
+						var d := q.distance_to(at)
+						if d < best_d:
+							best_d = d
+							best = [a, b, q, float(f[1]), f[2]]
+		if best.is_empty():
+			continue
+		var a2: Vector2 = best[0]
+		var b2: Vector2 = best[1]
+		var dir := (b2 - a2).normalized()
+		var n := Vector2(-dir.y, dir.x)
+		if n.dot((best[2] as Vector2) - (best[4] as Vector2)) < 0.0:
+			n = -n  # normale verso fuori
+		# Un po' di lato rispetto al punto (dove di solito c'è il portone), mai oltre lo spigolo.
+		var t := clampf((best[2] as Vector2).distance_to(a2) + 0.9, 0.5, a2.distance_to(b2) - 0.5)
+		var q2 := a2 + dir * t + n * 0.045
+		var pos := Vector3(q2.x, float(best[3]) + 2.3, q2.y)
+		var basis := Basis(Vector3(dir.x, 0, dir.y), Vector3.UP, Vector3(n.x, 0, n.y))  # testo leggibile da fuori
+		plates.append(Transform3D(basis, pos))
+		civic_spots.append([pos, Vector3(n.x, 0, n.y), String(cv[2]), String(cv[3])])
+		var num := Label3D.new()
+		num.text = String(cv[2])
+		num.font_size = 72
+		num.outline_size = 0
+		num.pixel_size = 0.0022
+		num.modulate = font_col
+		num.alpha_cut = Label3D.ALPHA_CUT_OPAQUE_PREPASS
+		num.shaded = true
+		num.double_sided = false
+		num.transform = Transform3D(basis, pos + Vector3(n.x, 0, n.y) * 0.022)
+		num.visibility_range_end = 30.0
+		add_child(num)
+	if plates.is_empty():
+		return
+	var box := BoxMesh.new()
+	box.size = Vector3(0.34, 0.24, 0.035)
+	var marble := StandardMaterial3D.new()
+	marble.albedo_color = Color(0.9, 0.89, 0.86)
+	marble.roughness = 0.35
+	box.material = marble
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.mesh = box
+	mm.instance_count = plates.size()
+	for i in plates.size():
+		mm.set_instance_transform(i, plates[i])
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "Civici"
+	mmi.multimesh = mm
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mmi)
+	print("civici: %d targhe" % plates.size())
 
 
 ## Muri invisibili sul bordo della mappa.
