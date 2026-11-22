@@ -1020,8 +1020,7 @@ func _build_buildings() -> void:
 			if pts.size() < 3:
 				continue
 		var h: float = b["h"]
-		var cc: Array = colors[int(b["c"])]
-		var col := Color(cc[0], cc[1], cc[2])
+		var col := building_color(b, colors)
 		var center := Vector2.ZERO
 		var area := 0.0
 		for i in pts.size():
@@ -1314,6 +1313,28 @@ func _build_trees() -> void:
 ## Numeri civici (data/civici.json, da tools/fetch_civici.py): targa di marmo bianco col numero nero, come a
 ## Roma, sulla facciata più vicina al punto dell'indirizzo, accanto al portone a circa 2,3 m da terra.
 ## Si vedono entro 30 m (sono quasi duemila).
+## Colori misurati su Google Street View (tools/fetch_streetview.py): SOLO su questo PC, la cartella locale/ non
+## viene pubblicata (le condizioni di Google non permettono di distribuirli). Se manca, nessun effetto.
+const LOCAL_COLORS := "res://locale/colori_streetview.json"
+static var _local_colors: Dictionary = {}
+static var _local_loaded := false
+
+
+## Colore della facciata: Street View in locale se c'è, poi quello reale da OSM o dalle foto Mapillary (campo
+## "col", vedi convert_osm.real_colour e fetch_facciate.py), altrimenti uno della tavolozza romana.
+static func building_color(b: Dictionary, colors: Array) -> Color:
+	if not _local_loaded:
+		_local_loaded = true
+		if FileAccess.file_exists(LOCAL_COLORS):
+			var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(LOCAL_COLORS))
+			if parsed is Dictionary:
+				_local_colors = parsed
+				print("colori Street View (locale): ", _local_colors.size())
+	var key := str(int(b.get("id", 0)))
+	var cc: Array = _local_colors[key] if _local_colors.has(key) else (b["col"] if b.has("col") else colors[int(b["c"])])
+	return Color(cc[0], cc[1], cc[2])
+
+
 func _build_civici() -> void:
 	if not FileAccess.file_exists("res://data/civici.json"):
 		return

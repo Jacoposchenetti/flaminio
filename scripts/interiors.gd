@@ -138,9 +138,8 @@ func build(b: Dictionary) -> Array:
 	var pts := _poly(b)
 	if _area(pts) < 0.0:
 		pts.reverse()  # antiorario: le normali esterne vengono a destra dei lati
-	var cc: Array = city.data["colors"][int(b["c"])]
 	var outside := _wall_mat.duplicate() as StandardMaterial3D
-	outside.albedo_color = Color(cc[0], cc[1], cc[2])
+	outside.albedo_color = CityBuilder.building_color(b, city.data["colors"])
 	var c := _centroid(pts)
 	var g := city.height_at(c.x, c.y)
 	var floors := maxi(2, int(float(b["h"]) / FLOOR_H))

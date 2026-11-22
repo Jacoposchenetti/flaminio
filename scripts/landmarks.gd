@@ -37,7 +37,7 @@ func _init(c: CityBuilder) -> void:
 	conc.roughness = 0.85
 	_concrete = conc
 	var gran := conc.duplicate() as StandardMaterial3D
-	gran.albedo_color = Color(0.72, 0.58, 0.55)  # granito rosa di Assuan
+	gran.albedo_color = Color(0.8, 0.74, 0.67)  # granito degli obelischi: dal vero chiaro, beige-grigio (rosato appena)
 	gran.roughness = 0.5
 	_granite = gran
 	var gl := StandardMaterial3D.new()
@@ -46,7 +46,7 @@ func _init(c: CityBuilder) -> void:
 	gl.roughness = 0.05
 	_glass = gl
 	_lead = _panels(Color(0.45, 0.47, 0.5), 1.1, 3.0, 0.6, 0.45)
-	_ribbed = _panels(Color(0.78, 0.77, 0.74), 2.2, 6.0, 0.0, 0.85)
+	_ribbed = _panels(Color(0.8, 0.77, 0.7), 2.2, 6.0, 0.0, 0.85)  # cemento del Palazzetto, un po' caldo
 	var br := ShaderMaterial.new()
 	br.shader = load("res://shaders/brick.gdshader")
 	_brick = br
@@ -344,17 +344,22 @@ func _cavea(lm: Dictionary) -> void:
 	var g := city.height_at(c.x, c.y)
 	var acc := CityBuilder.Acc.new()
 	var rays := 120
-	var steps := 12
-	var rise := 0.42
+	var steps := 18
 	var cols := []  # per raggio: [] se lì non c'è gradinata, altrimenti steps+1 punti [Vector2, quota]
 	for k in rays:
 		var dir := Vector2(cos(TAU * k / rays), sin(TAU * k / rays))
 		var hits := _ray_all(c, dir, poly, 200.0)
 		var col := []
 		if hits.size() >= 2 and hits[-1] - hits[0] > 3.0:
+			# Le gradinate seguono la conca vera del rilievo (LiDAR: dal palco a circa -3,5 m fin quasi a +6 m):
+			# ogni gradone sta appena sopra il terreno al suo bordo esterno, sempre in salita.
+			var y := g + 0.2
 			for j in steps + 1:
 				var r := lerpf(hits[0], hits[-1], float(j) / steps)
-				col.append([c + dir * r, g + 0.2 + j * rise])
+				var r_out := lerpf(hits[0], hits[-1], float(mini(j + 1, steps)) / steps)
+				var q := c + dir * r_out
+				y = maxf(y + (0.15 if j > 0 else 0.0), city.height_at(q.x, q.y) + 0.12)
+				col.append([c + dir * r, y])
 		cols.append(col)
 	for k in rays:
 		var prev: Array = cols[k]
@@ -403,7 +408,10 @@ func _cavea(lm: Dictionary) -> void:
 		var pt: Vector2 = col[steps][0]
 		var pt2 := pt + (pt - c).normalized() * 0.3
 		_qa(acc, _v3(pt, g - 0.5), _v3(pt2, g - 0.5), _v3(pt2, float(col[steps][1]) + 1.0), _v3(pt, float(col[steps][1]) + 1.0), side_away)
-	_finish(acc, _stone, "Auditorium_cavea")
+	# Muri e gradinate in mattoni, come le sale: le pedate (orizzontali, che nello shader sono "malta") color cotto.
+	var cavea_mat := (_brick as ShaderMaterial).duplicate() as ShaderMaterial
+	cavea_mat.set_shader_parameter("mortar_color", Color(0.66, 0.47, 0.37))
+	_finish(acc, cavea_mat, "Auditorium_cavea")
 
 
 ## Tutte le distanze a cui il raggio da c in direzione dir taglia il poligono, in ordine.

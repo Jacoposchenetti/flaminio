@@ -190,6 +190,15 @@ pedoni e traffico risentono per tutti: conviene che ospiti il PC più potente.
   `data/civici.json`; il gioco mette una targa di marmo col numero nero sulla facciata più vicina, accanto al
   portone (`_build_civici`, ~1700 targhe, visibili entro 30 m). Prova: `--civico=n` davanti alla targa n.
 
+## Colori delle facciate
+
+- Dove OpenStreetMap indica il colore (`building:colour`) o il materiale della facciata, il palazzo usa quello (~70).
+- `tools/fetch_facciate.py` (elenco → foto → colori → applica) misura gli altri sulle foto di strada di Mapillary:
+  sceglie le foto che inquadrano la facciata, usa la segmentazione "edificio" di Mapillary come maschera, scarta
+  le foto notturne e porta i colori a una scala comune. Risultato in `data/colori_facciate.json` (~140 palazzi).
+  Serve `tools/mapillary_token.txt`; le foto restano in `tools/cache_mapillary/` (non pubblicate).
+- Gli altri palazzi (dove Mapillary non ha foto) restano con la tavolozza romana casuale.
+
 ## Case
 
 - `scripts/homes.gd` (`Homes`): 16 case scelte nei palazzi veri (due per zona, portone sul lato verso la strada),
@@ -242,6 +251,7 @@ inquadrature), `--fight`, `--cops`, `--stairs=n`, `--shop=n`, `--inside=edificio
 ## Crediti
 
 - Mappa © OpenStreetMap contributors (ODbL).
+- Colori delle facciate ricavati da foto © Mapillary contributors (CC BY-SA 4.0).
 - Rilievo: LiDAR DTM 1 m Regione Lazio, Piano Straordinario di Telerilevamento, Ministero dell'Ambiente e della
   Sicurezza Energetica (open data); dove manca, TINITALY/1.1, Tarquini S. et al., INGV,
   https://doi.org/10.13127/tinitaly/1.1 (CC BY 4.0).
