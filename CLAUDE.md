@@ -27,6 +27,8 @@ C'è un grafo graphify (`graphify-out/`). Per domande sul codice usare prima
   - `crime.gd`, `clans.gd`, `banks.gd`, `missions.gd`, `homes.gd` (malavita, banche, missioni, case)
   - `navigator.gd`, `map_view.gd`, `hud.gd`, `pause_menu.gd`, `weapon_wheel.gd`, `day_night.gd`
   - `updater.gd`: aggiornamento automatico dal menu iniziale
+  - `locali.gd`: locali modellati in Blender (`assets/locali/<nome>/*.glb`) al posto delle scatole OSM
+    (tabella `LOCALI`: id OSM sostituiti, spigolo e asse della pianta; nodi vuoti `luce_<tipo>_NN` → luci)
 - `data/`: `city.json` (dati OSM convertiti; i POI hanno il sottotipo all'indice [5]), `dem/`
   (rilievo: LiDAR 1 m MASE + TINITALY, WorldCover per prati e alberi; `lidar_dtm.npy` non viene
   distribuito)
@@ -35,6 +37,10 @@ C'è un grafo graphify (`graphify-out/`). Per domande sul codice usare prima
   (gli "amici" sono suoi PC in altre case). Mapillary: `tools/fetch_facciate.py` → `data/colori_facciate.json`.
   Ogni file di `data/` che il gioco legge va aggiunto a `DATA` in `tools/stage.py`, altrimenti non viene pubblicato.
 - `assets/`: modelli (Quaternius, Poly Pizza, ambientCG; tutti CC0), suoni sintetizzati
+- `tools/blender/`: modelli costruiti da script (`treebar.py`: Tree Bar su via Flaminia, dalle foto del tour
+  interno su Google Maps). Rigenerare: `"C:/Program Files/Blender Foundation/Blender 5.3/blender.exe" --background
+  --factory-startup --python tools/blender/treebar.py`, poi `godot --headless --import`. Texture CC0 in
+  `tools/blender/textures/`; Blender scrive JPEG con profilo ICC che Godot non legge (lo script lo toglie).
 - `tools/`: script Python di conversione OSM (`convert_osm`), `import_lidar.py`,
   `fetch_worldcover.py`, `gen_sounds.py`, `make_package.ps1` (zip per gli amici, include
   `LEGGIMI.txt`), `pubblica_aggiornamento.py`, `server/` (server headless su telefono Android)

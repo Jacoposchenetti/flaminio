@@ -15,3 +15,5 @@ __pycache__/
 graphify-out/
 /C
 *.tmp
+tools/blender/textures/_pronte/
+tools/blender/*.blend1

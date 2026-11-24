@@ -111,6 +111,7 @@ class Acc:
 func build() -> void:
 	var t0 := Time.get_ticks_msec()
 	data = JSON.parse_string(FileAccess.get_file_as_string("res://data/city.json"))
+	Locali.strip(data)  # edifici sostituiti da locali modellati a mano (scripts/locali.gd)
 	cell = data["cell"]
 	hmap_w = int(data["hmap_size"][0])
 	hmap_h = int(data["hmap_size"][1])
@@ -157,6 +158,7 @@ func build() -> void:
 
 func _build_landmarks() -> void:
 	LandmarkBuilder.new(self).build()
+	Locali.build(self)
 	for vn: Dictionary in venues:
 		venue_rooms.append(Venues.build_room(self, vn))
 	var ib := Interiors.new(self)

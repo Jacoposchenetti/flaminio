@@ -251,6 +251,7 @@ inquadrature), `--fight`, `--cops`, `--stairs=n`, `--shop=n`, `--inside=edificio
 ## Crediti
 
 - Mappa © OpenStreetMap contributors (ODbL).
+- Tree Bar (via Flaminia) modellato in Blender dalle foto del locale; texture CC0 di ambientCG.
 - Colori delle facciate ricavati da foto © Mapillary contributors (CC BY-SA 4.0).
 - Rilievo: LiDAR DTM 1 m Regione Lazio, Piano Straordinario di Telerilevamento, Ministero dell'Ambiente e della
   Sicurezza Energetica (open data); dove manca, TINITALY/1.1, Tarquini S. et al., INGV,
