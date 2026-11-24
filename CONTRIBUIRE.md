@@ -17,7 +17,7 @@ Da lì i PC dove è installato il gioco (e il server sul telefono) scaricano gli
    ```
 3. Scarica il progetto:
    ```
-   git clone https://github.com/Jacoposchenetti/flaminio.git Flaminio
+   git clone -b main https://github.com/Jacoposchenetti/flaminio.git Flaminio
    ```
 4. Indica allo script dove sta Godot (adatta il percorso):
    ```
