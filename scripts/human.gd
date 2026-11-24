@@ -49,6 +49,12 @@ const PRESETS := {
 	"f8": ["f", "scura", "Buns", "castano", false, Color(0.35, 0.3, 0.6), Color(0.2, 0.2, 0.22), Color(0.95, 0.95, 0.95), true, false, true, false],
 }
 
+## Divise da calcio: stampa sulla schiena, colore dei bordi e dei calzettoni, fascia da capitano.
+const KITS := {
+	"totti": {"print": "res://assets/people/totti/maglia_retro.png", "trim": Color(0.95, 0.72, 0.16),
+		"socks": Color(0.56, 0.1, 0.16), "armband": true},
+}
+
 ## Divise (non scelte dai giocatori né dai pedoni): Polizia di Stato, camicia azzurra e pantaloni blu scuro.
 const UNIFORMS := {
 	"cop_m": ["m", "olivastra", "Buzzed", "nero", false, Color(0.55, 0.68, 0.86), Color(0.08, 0.1, 0.18), Color(0.05, 0.05, 0.05), true, false, false, false],
@@ -63,6 +69,8 @@ const UNIFORMS := {
 	# Vigilanza privata delle banche (camicia grigia, pantaloni scuri) e direttore di filiale.
 	"guard": ["m", "olivastra", "Buzzed", "nero", false, Color(0.32, 0.34, 0.38), Color(0.1, 0.11, 0.14), Color(0.04, 0.04, 0.04), true, false, false, false],
 	"banker": ["m", "chiara", "SimpleParted", "grigio", false, Color(0.12, 0.16, 0.28), Color(0.12, 0.13, 0.18), Color(0.06, 0.05, 0.04), false, false, true, false],
+	# Personaggi famosi (scripts/icone.gd). Francesco Totti con la maglia della Roma: rosso pompeiano e calzoncini bianchi.
+	"totti": ["m", "chiara", "SimpleParted", "castano", false, Color(0.56, 0.1, 0.16), Color(0.95, 0.95, 0.93), Color(0.04, 0.04, 0.04), false, true, false, false],
 	"boss": ["m", "olivastra", "SimpleParted", "grigio", true, Color(0.16, 0.16, 0.18), Color(0.14, 0.14, 0.16), Color(0.05, 0.04, 0.03), true, false, false, false],
 }
 
@@ -101,6 +109,8 @@ func setup(id: String) -> Human:
 		if mat.resource_name.begins_with("MI_Superhero"):
 			mi.mesh = _bind_pose_mesh(sex, mi.mesh)
 			mi.material_override = _clothes_material(sex, mat, p, bone)
+			if KITS.has(id):
+				_kit(mi.material_override as ShaderMaterial, KITS[id], bone)
 		elif mat.resource_name.begins_with("MI_Hair"):
 			mi.material_override = _hair_material(mat, p[3])
 
@@ -261,6 +271,17 @@ func _clothes_material(sex: String, src: StandardMaterial3D, p: Array, bone: Cal
 	m.set_shader_parameter("denim", 1.0 if p[10] else 0.0)
 	m.set_shader_parameter("stripes", 1.0 if p[11] else 0.0)
 	return m
+
+
+func _kit(m: ShaderMaterial, k: Dictionary, bone: Callable) -> void:
+	var knee: Vector3 = bone.call("calf_l")
+	m.set_shader_parameter("kit", 1.0)
+	m.set_shader_parameter("kit_print", load(k["print"]))
+	m.set_shader_parameter("trim_color", k["trim"])
+	m.set_shader_parameter("sock_color", k["socks"])
+	m.set_shader_parameter("sock_top_y", knee.y - 0.03)
+	m.set_shader_parameter("pants_end_y", knee.y + 0.13)  # calzoncini corti
+	m.set_shader_parameter("armband", 1.0 if k.get("armband", false) else 0.0)
 
 
 func _hair_material(src: StandardMaterial3D, color_name: String) -> StandardMaterial3D:

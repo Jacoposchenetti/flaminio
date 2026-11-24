@@ -18,6 +18,13 @@ uniform float sleeve_x = 0.33; // fine della manica lungo il braccio (posa a T)
 uniform float torso_x = 0.2;
 uniform float denim = 1.0; // trama del jeans
 uniform float stripes = 0.0; // maglia a righe
+// Divisa da calcio (kit = 1): bordi, calzettoni, fascia da capitano, nome e numero sulla schiena.
+uniform float kit = 0.0;
+uniform sampler2D kit_print : source_color, filter_linear_mipmap;
+uniform vec3 trim_color : source_color = vec3(0.95, 0.72, 0.16);
+uniform vec3 sock_color : source_color = vec3(0.55, 0.06, 0.1);
+uniform float sock_top_y = 0.45;
+uniform float armband = 0.0;
 
 varying vec3 bind;
 
@@ -51,6 +58,10 @@ void fragment() {
 		if (y < 0.025) ccol *= 0.35; // suola
 		cloth = 1.0;
 		rough = 0.55;
+	} else if (kit > 0.5 && y < sock_top_y && ax < 0.3) {
+		ccol = sock_color;
+		if (y > sock_top_y - 0.05 && y < sock_top_y - 0.025) ccol = trim_color; // fascia gialla sul risvolto
+		cloth = 1.0;
 	} else if (y < waist_y && y >= pants_end_y && ax < 0.3) {
 		ccol = pants_color;
 		if (denim > 0.5) {
@@ -59,7 +70,7 @@ void fragment() {
 			// Scolorito su cosce e ginocchia.
 			ccol = mix(ccol, ccol * 1.5, smoothstep(0.02, 0.0, abs(bind.z - 0.03)) * 0.4);
 		}
-		if (y > waist_y - 0.035) ccol = vec3(0.04, 0.03, 0.02); // cintura
+		if (y > waist_y - 0.035 && kit < 0.5) ccol = vec3(0.04, 0.03, 0.02); // cintura (non sui calzoncini)
 		cloth = 1.0;
 	} else if (ax > torso_x && y > waist_y + 0.2) {
 		// Braccia (orizzontali nella posa a T): manica fino a sleeve_x.
@@ -67,6 +78,8 @@ void fragment() {
 			ccol = shirt_color;
 			if (stripes > 0.5) ccol *= 0.7 + 0.3 * step(0.5, fract(ax * 22.0));
 			if (ax > sleeve_x - 0.015) ccol *= 0.85; // orlo della manica
+			if (kit > 0.5 && ax > sleeve_x - 0.03) ccol = trim_color; // polsino giallo
+			if (armband > 0.5 && bind.x > 0.0 && ax > torso_x + 0.05 && ax < torso_x + 0.1) ccol = trim_color; // fascia da capitano
 			cloth = 1.0;
 		}
 	} else if (y >= waist_y - 0.005 && y < neck_y + max(0.0, ax - 0.06) * 0.9) {
@@ -74,13 +87,23 @@ void fragment() {
 		if (stripes > 0.5) ccol *= 0.7 + 0.3 * step(0.5, fract(y * 22.0));
 		// Scollo a girocollo davanti.
 		cloth = (ax < 0.06 && bind.z > 0.02 && y > neck_y - 0.02 + ax * 0.3) ? 0.0 : 1.0;
+		if (kit > 0.5) {
+			if (y > neck_y - 0.035 + max(0.0, ax - 0.06) * 0.9) ccol = trim_color; // colletto
+			if (bind.z < -0.02) {
+				vec2 puv = vec2(0.5 - bind.x / 0.34, (neck_y - 0.06 - y) / 0.34);
+				if (puv.x > 0.0 && puv.x < 1.0 && puv.y > 0.0 && puv.y < 1.0) {
+					vec4 pr = texture(kit_print, puv);
+					ccol = mix(ccol, pr.rgb, pr.a);
+				}
+			}
+		}
 	}
 	if (cloth > 0.5) {
 		// Tessuto: pieghe morbide, niente muscoli in rilievo.
 		float folds = vnoise(vec2(bind.x * 40.0, bind.y * 25.0));
 		col = ccol * (0.85 + 0.2 * folds);
 		nrm = mix(vec3(0.5, 0.5, 1.0), nrm, 0.25) + vec3((folds - 0.5) * 0.15, 0.0, 0.0);
-		rough = max(rough, 0.8);
+		rough = kit > 0.5 ? 0.6 : max(rough, 0.8); // la maglia sintetica luccica un po'
 	}
 	ALBEDO = col;
 	NORMAL_MAP = nrm;

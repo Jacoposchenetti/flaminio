@@ -40,6 +40,7 @@ var _speed: Label
 var cars: Array[Car] = []
 var combat: Combat
 var pedestrians: Pedestrians
+var icone: Icone
 var traffic: Traffic
 var police: Police
 var netsync: NetSync
@@ -688,6 +689,10 @@ func _start_playing() -> void:
 		pedestrians.name = "Pedoni"
 		add_child(pedestrians)
 		pedestrians.setup(city, self, combat)
+		icone = Icone.new()
+		icone.name = "Icone"
+		add_child(icone)
+		icone.setup(city, self)
 		traffic = Traffic.new()
 		traffic.name = "Traffico"
 		add_child(traffic)
@@ -1490,6 +1495,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		_open_clan_ui(-1)
 	elif event.is_action_pressed("backup") and not player.dead:
 		clan_request("backup", [])
+	elif event.is_action_pressed("interact") and not hud.shop_open() and icone and not player.mounted() and not player.dead and icone.talk(player.global_position):
+		pass
 	elif event.is_action_pressed("interact") and not hud.shop_open() and not _slot_here().is_empty() and not player.mounted() and not player.dead:
 		_open_slot()
 	elif event.is_action_pressed("interact") and not hud.shop_open():
@@ -1642,6 +1649,8 @@ func _process(delta: float) -> void:
 			var bn: Array = clans.boss_near(player.global_position, 2.6)
 			var bc: Dictionary = clans.clan(int(bn[1]))
 			_hint.text = "E / croce su: parla con %s (%s)" % [bc.get("boss", "il boss"), bc.get("name", "")]
+		elif icone and icone.hint(player.global_position) != "" and not player.mounted():
+			_hint.text = icone.hint(player.global_position)
 		elif not _slot_here().is_empty() and not player.mounted():
 			_hint.text = "E / croce su: gioca alla slot machine"
 		elif player.stash > 0 and _nearest_passerby(2.5) != null:
