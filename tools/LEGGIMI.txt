@@ -1,0 +1,201 @@
+﻿FLAMINIO - come giocare insieme
+
+Si puo giocare insieme anche da case diverse (reti diverse, via Internet). Due modi:
+
+A) TAILSCALE (consigliato, funziona quasi sempre, anche da reti diverse)
+1. Installa Tailscale (https://tailscale.com/download) e accedi.
+   Chi ospita ti deve invitare nella sua rete Tailscale (Condividi / Invite), oppure usate lo stesso account.
+   Tailscale collega i due PC attraverso Internet come se fossero in casa: non serve toccare il router.
+
+B) SENZA TAILSCALE (indirizzo pubblico)
+   Chi ospita preme "Ospita una partita": il gioco chiede al router di aprire la porta UDP 7777 (UPnP) e scrive
+   in chat l'indirizzo pubblico da mandare all'amico. Funziona solo se il router ha l'UPnP acceso; se il gioco
+   dice che il router non risponde: accendi l'UPnP nelle impostazioni del router, oppure apri a mano la porta
+   UDP 7777 verso il PC di chi ospita, oppure usate Tailscale. Con alcuni operatori (indirizzo condiviso, CGNAT)
+   da Internet non si entra in nessun caso: serve Tailscale.
+
+2. Scompatta questa cartella dove vuoi e fai doppio clic su Gioca.bat.
+3. Scrivi il tuo nome, scegli il personaggio.
+   - Chi ospita preme "Ospita una partita" (la prima volta Windows chiede il permesso del firewall: consenti).
+   - Gli altri scrivono l'indirizzo di chi ospita (Tailscale 100.x.y.z, che si vede nel menu, oppure
+     quello pubblico scritto in chat) e premono "Entra".
+   Il menu si usa anche senza mouse: frecce (o croce del joypad) per spostarsi, Invio (o A / Croce) per scegliere.
+
+AGGIORNAMENTI
+Nel menu iniziale, sotto il titolo, c'e la versione che hai. Quando ne esce una nuova il pulsante diventa verde:
+"Aggiorna alla versione N". Premilo: scarica solo i file cambiati, si chiude e si riavvia da solo aggiornato.
+Per giocare insieme dovete avere tutti la stessa versione (se no il gioco ve lo dice in chat).
+
+MENU (Esc, P o Start del joypad)
+Riprendi, mappa, elenco dei comandi, grafica alta/bassa, polizia, cambia personaggio, cambia nome,
+torna al punto di partenza, esci. Da soli il gioco si ferma; in rete la partita continua.
+
+TASTIERA E MOUSE
+WASD muoversi, Shift correre, Spazio saltare, mouse camera, rotella zoom, destro mira, sinistro spara,
+R ricarica, Tab (tieni premuto) rotella delle armi, 1-7 scorciatoie, B fa esplodere la TNT, E compra, F sali/scendi (auto e monopattini, o ruba l'auto),
+M mappa, H ritorno, C personaggio, T chat (/nome NuovoNome), F2 grafica, F3 polizia, Esc menu.
+In auto: W accelera, S frena/retromarcia, A/D sterza, Spazio freno a mano, G clacson.
+
+JOYPAD (Xbox o PlayStation, collegalo prima di avviare o anche dopo)
+Levetta sinistra muoversi, levetta destra camera
+Clic levetta sinistra (L3) correre (resta acceso finche ti muovi)
+LB / L1 accovacciarsi (in auto e monopattino: spara)   A / Croce saltare     B / Cerchio capriola    X / Quadrato ricarica
+LT / L2 mirare          RT / R2 sparare       RB / R1 tenuto: rotella delle armi (scegli con la levetta destra)
+Y / Triangolo sali/scendi da auto e monopattini, o ruba l'auto (in auto: RT gas, LT freno, A freno a mano, R3 clacson)
+Croce: su = negozio, giu = fa esplodere la TNT, sinistra = ritorno, destra = mappa
+Start = menu, Back / Share = mappa
+Mappa: levetta sinistra sposta, grilletti zoom, A sul luogo al centro = indicazioni, B chiude.
+Negozio: su/giu per scegliere, A compra, B esce.
+
+MAPPA E INDICAZIONI (come Google Maps)
+I luoghi dove fai qualcosa sono spilli grandi e colorati col nome: armeria (rosso, G), farmacia (verde, croce),
+bar (arancione, B), fornitore (viola, $), palazzo esplorabile (giallo, E). Il resto sono puntini sbiaditi.
+Apri la mappa (M), clicca un luogo (armeria, bar, farmacia, monumento, palazzo esplorabile...): compare il percorso
+in blu sulle strade, con distanza, minuti a piedi e le svolte. Anche sulla minimappa e in alto a sinistra
+("tra 120 m: gira a destra in Via Flaminia"). Clic destro = segnalino libero. Arrivato, il percorso sparisce.
+
+AUTO, MONOPATTINI, AUTOBUS
+- Auto parcheggiate: F / Y per salire.
+- Auto in movimento: avvicinati e premi F / Y: tiri fuori chi guida (scappa) e la prendi. Se c'e un agente
+  vicino ti becchi una stella.
+- Monopattini elettrici in sharing sui marciapiedi: F / Y per salire, W o RT avanti (circa 25 km/h), S o LT frena,
+  A/D o levetta sterza, F / Y per scendere.
+- Autobus ATAC girano per le strade grandi e si fermano alle fermate.
+
+SPARARE DAI MEZZI
+In auto e in monopattino: mira con il mouse (o levetta destra) e spara con il tasto sinistro (joypad: LB / L1,
+perche RT serve per accelerare). Solo armi da fuoco e lanciarazzi; R / X ricarica.
+
+SOLDI: SPACCIO E RAPINE
+- Spaccio: compra i pacchetti dal Fornitore, un tizio che aspetta in un vialetto del verde (spillo viola "$"
+  sulla mappa): avvicinati e premi E. Se sente spari scappa; se muore per 5 minuti non c'e nessuno.
+  Poi avvicinati ai passanti e premi
+  E (croce su): 1 su 20 compra (60-110 euro a pacchetto), 1 su 20 chiama la polizia (1 stella), gli altri non
+  sono interessati. Se un agente ti vede mentre lo fai diventi ricercato (1 stella). Ognuno si prova una volta sola.
+- Rapine: in bar, farmacie e armerie il commesso sta dietro al bancone, alla cassa. Puntagli contro un'arma da
+  fuoco (tasto destro / LT); all'armeria reagisce sempre armato. Negli altri locali:
+  alza le mani e ti lascia l'incasso a terra, oppure scappa lasciando cadere la refurtiva, oppure reagisce
+  (a pugni o con una pistola). 2 stelle. Lo stesso locale si puo rapinare di nuovo dopo 5 minuti.
+- Agenti uccisi: oltre ai soldi lasciano la loro arma con i colpi (scatola verde e gialla a terra).
+- Ucciso da un altro giocatore: meta dei tuoi soldi resta a terra dove sei morto (chiunque puo prenderli);
+  quella e la perdita, alla rinascita non perdi altro.
+
+ELICOTTERI
+Due elicotteri pilotabili sulle piazzole (cerchio giallo con la H, spillo blu "H" sulla mappa): F / Y per salire.
+Il rotore prende giri in 3 secondi, poi: Spazio sale, Ctrl scende, W/S avanti e indietro, A/D gira, Shift piu veloce
+(joypad: levetta sinistra, RT sale, LT scende). Si mira con la camera: tasto sinistro (LB) mitragliatrice,
+tasto destro o R (X / Quadrato) razzi. Se scendi in volo cadi! Distrutti, tornano nuovi sulla piazzola dopo un po'.
+
+ELICOTTERO DELLA POLIZIA
+A 5 stelle arriva l'elicottero della polizia: ti gira sopra a 30 m con il faro puntato, finche ti vede le stelle
+non calano e il mitragliere spara a raffiche. Si puo abbattere (700 punti di danno): precipita ed esplode.
+
+JETPACK
+Si compra in armeria (12.000 euro). Salta e tieni premuto Spazio (A / Croce) in aria: vola; Ctrl scende piano,
+Shift va piu veloce, J lo togli e lo rimetti. Il serbatoio dura 14 secondi (barra arancione sotto la vita) e a terra si riempie.
+Attenzione: se lo spegni in alto cadi.
+
+SLOT MACHINE
+In ogni bar ci sono due slot machine contro le pareti: avvicinati e premi E (croce su). Puntata da 5 a 500 euro
+con le frecce (o i pulsanti - e +), Spazio / Invio / A per girare, Esc / B per uscire. Tre uguali sulla linea
+rossa: da 8 volte (ciliegie) a 400 volte la puntata (7-7-7, jackpot). Due ciliegie x2, una ciliegia x1.
+
+GIORNO E NOTTE
+Una giornata intera dura 45 minuti (l'ora e scritta sotto la barra della vita). Al tramonto si accendono
+lampioni, finestre, vetrine e i fari delle auto guidate. In rete l'ora la decide chi ospita.
+
+SPACCIO
+Gli spacciatori (uno per zona, spillo viola "$") vendono erba, fumo, cocaina, MD e LSD a pacchi da 5 o 10 dosi
+(se ne portano 40 in tutto). Avvicinati a un passante e premi E: ognuno cerca una droga precisa (di notte piu MD,
+LSD e cocaina, e si paga di piu). Erba e fumo costano poco e rendono poco; la cocaina rende tanto ma rischia di piu.
+Se sei del clan che tiene la zona paghi il 20% in meno dallo spacciatore e lasci il 15% di ogni vendita al clan.
+
+FAMA CRIMINALE (resta tra una partita e l'altra)
+Omicidi, agenti uccisi, rapine, furti, spaccio, uomini dei clan uccisi, polizia seminata e zone conquistate danno
+fama: Nessuno, Teppista, Malvivente, Delinquente, Criminale (700: puoi fondare un clan), Boss, Padrino.
+
+CLAN
+Il quartiere e diviso in 8 zone (colorate sulla mappa) tenute da 4 clan: Banda della Magliana (Ponte Milvio,
+Tor di Quinto), Clan del Flaminio (Villaggio Olimpico, Flaminio), I Pariolini (Parioli, Valle Giulia), Clan di
+Prati (Piazza del Popolo, Della Vittoria). In alto sullo schermo c'e scritto di chi e la zona dove sei.
+- Ogni clan ha un boss (teschio sulla mappa) con due guardie: avvicinati e premi E. Ognuno ha le sue condizioni:
+  fama minima, una quota, o una prova (vendere dosi nel loro territorio, uccidere uomini di altri clan).
+- Spacciare nella zona di un clan che non e il tuo lo fa arrabbiare: prima ti avvisano, poi mandano i picciotti
+  armati a cercarti nel loro territorio. Colpire i loro uomini peggiora tutto. La rabbia passa col tempo.
+- Da affiliato (U apre il pannello): i tuoi ti coprono con la polizia (da soli se hai 3 stelle nel tuo
+  territorio, o col tasto N), puoi corrompere un funzionario (meno una stella, a pagamento), il boss ti da
+  lavori (regolamenti di conti, spaccio, rapine nelle zone nemiche) e puoi assumere spacciatori: gli lasci delle
+  dosi, vendono per te e ti passano l'incasso (si tengono il 35%). Possono essere arrestati e fare il tuo nome
+  (2 stelle), e nelle zone dei rivali possono essere pestati.
+- Fondare un clan (fama 700 e 25.000 euro, dal pannello U): sei il capo, decidi le condizioni d'ingresso e chi
+  entra (gli amici chiedono dal pannello). Le zone si conquistano uccidendo gli uomini di chi le tiene e spacciando
+  li: ogni zona rende al minuto (spaccio, estorsioni, prostituzione) tra cassa del clan, capo e affiliati.
+- Rischi: l'indagine della polizia sul clan sale con arresti e omicidi; a 80% scatta il blitz della DDA (stelle
+  a tutti gli affiliati, cassa sequestrata, spacciatori arrestati). Chi perde una zona entra in guerra con te.
+- Lasciare un clan storico ti rende un traditore: ti cercheranno.
+
+BANCHE (spillo dorato "€" sulla mappa)
+Cinque filiali dove ci sono banche vere (con nomi inventati): atrio, tre sportelli dietro il vetro, ufficio del
+direttore, caveau blindato, telecamere, vigilanza armata e bancomat in facciata.
+- Conto corrente: allo sportello o al bancomat (E) versi e prelevi. I soldi in banca non si perdono quando muori
+  e a ogni mezzanotte fruttano l'1% (fino a 2.000 euro al giorno).
+- Vigilanza: se punti un'arma dentro la banca ti intimano di metterla giu; dopo 3 secondi sparano. Spari, colpi ai
+  dipendenti o rapine fanno scattare l'allarme: sirena, luci rosse, 4 stelle.
+- Rapina allo sportello: punta un'arma all'impiegato, ti passa il cassetto (1.500-4.000 euro).
+- Il colpo grosso: apri il caveau prendendo in ostaggio il direttore (puntagli l'arma: dopo 6 secondi apre),
+  col trapano (E alla porta del caveau, 18 secondi senza allontanarti) o facendo saltare la porta con la TNT.
+  Dentro ci sono 6 sacchi da 6.000-12.000 euro (E per prenderli). 5 stelle, elicottero della polizia compreso.
+  Dopo il colpo la banca resta chiusa per indagini 15 minuti, poi riapre con il caveau pieno.
+
+MISSIONI (spillo giallo "M" e colonna di luce gialla)
+Tre contatti: Zio Franco (vicino alla partenza), La Contessa (Parioli), Er Meccanico (Tor di Quinto). Avvicinati
+e premi E per accettare la prossima missione. Obiettivo in alto, percorso sulla mappa, a volte un timer; se muori
+(o rovini quello che devi portare) fallisce e puoi riprovare. Recupero crediti, Auto per il boss, Il colpo grosso
+(banca), Festa privata (bersaglio con la scorta), Furgone portavalori, Corsa clandestina, Consegna calda.
+
+SICARI (in rete, dal pannello del clan U)
+Se sei in un clan puoi pagare uno dei suoi sicari per far fuori un altro giocatore in partita (non del tuo clan).
+Il prezzo sale con la fama del bersaglio e con quella del sicario (piu bravo: piu resistente, mira migliore,
+fucile d'assalto). Il bersaglio viene avvisato che c'e una taglia su di lui. Il sicario ha 5 minuti; se fallisce
+o viene ucciso non ci sono rimborsi, e a volte fa il nome di chi l'ha mandato. Con ogni colpo a segno sale di fama.
+
+CASE (spillo verde "C" in vendita, blu "C" le tue)
+16 case in palazzi veri, due per zona: monolocali, appartamenti e attici (ai Parioli e a Piazza del Popolo costano
+di piu). Davanti al portone (cerchio verde) premi E: puoi visitarla, comprarla (con i contanti: preleva in banca),
+entrare o venderla (ti ridanno il 70% della casa e meta dei mobili).
+- Dentro: cucina, bagno, camera, finestre che cambiano col giorno e la notte. E vicino alla porta per uscire.
+- Arredare: tasto O in casa. Vista dall'alto, catalogo a sinistra (divano, letto, TV, libreria, tappeto, biliardo,
+  pianoforte, acquario...): il mobile segue il mouse, rotella o R per girarlo, clic sinistro per posarlo, clic
+  destro per lasciarlo. Clicca un mobile gia posato per spostarlo o rivenderlo. Esc per finire.
+- Cassaforte: soldi e droga che non perdi quando muori. Armadio: cambi personaggio. Letto: dormi (da soli fino
+  alle 8 di mattina) e torni in piena vita.
+- Quando muori rinasci davanti alla tua casa piu vicina; anche H ti ci porta.
+- Con la polizia alle costole non si entra. Le case sono tue sul tuo PC: gli amici non entrano in casa tua.
+
+MODALITA CREATIVA (solo da soli)
+Nel menu iniziale spunta "Modalita creativa" (o accendila dal menu di pausa): tutte le armi, munizioni,
+soldi e carburante del jetpack infiniti. K fa arrivare un elicottero davanti a te.
+
+RELITTI
+Le auto esplose spariscono dopo un minuto, quelle ribaltate dopo 20 secondi (solo quando sei lontano).
+
+CORRERE
+Si corre piu veloce a mani nude o col coltello, piu piano con le armi pesanti (lanciarazzi il piu lento).
+
+DOVE SI TROVANO LE ARMI
+Armi, munizioni, granate, mine, TNT e giubbotto si comprano nelle ARMERIE: un raggio rosso altissimo nel cielo,
+una G rossa sulla mappa (M). Entra dalla porta, vai al bancone (cerchio rosso a terra) e premi E / croce su.
+Le armerie del gioco stanno nei supermercati e minimarket veri del quartiere, sparsi su tutta la mappa.
+All'inizio della partita c'e gia il percorso verso l'armeria piu vicina.
+Le munizioni sono nella stessa lista, sotto ogni arma ("munizioni"). Si parte con una pistola (tasto 2) e 500 euro;
+altri soldi li lasciano cadere i pedoni colpiti (banconote verdi a terra).
+
+VITA: dopo 5 secondi senza essere colpito risale da sola fino a meta. Oltre la meta la ridanno
+i bar (cibo) e le farmacie (cerotti e kit medico): sono locali veri con porta, vetrine e commesso al bancone,
+sparsi in tutto il quartiere dove ci sono davvero. Se il commesso non c'e (rapinato, scappato) il locale e chiuso.
+Le armi da fuoco scariche non si perdono: basta ricomprare le munizioni.
+
+POLIZIA: se gli agenti non ti vedono piu, ti cercano dove ti hanno visto l'ultima volta. Resta nascosto
+e le stelle lampeggiano e spariscono (10 secondi + 4 per ogni stella).
+
+Mappa (c) OpenStreetMap contributors. Rilievo: LiDAR Regione Lazio (Ministero dell'Ambiente, open data) e TINITALY INGV (CC BY 4.0). Prati e alberi in più: ESA WorldCover 2021 (CC BY 4.0). Personaggi, animazioni e auto Quaternius (CC0). Texture ambientCG (CC0). Godot Engine (MIT).

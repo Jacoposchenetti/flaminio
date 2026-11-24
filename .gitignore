@@ -1,0 +1,17 @@
+# Rigenerati da Godot (godot --import)
+.godot/
+
+# Chiavi personali: mai su GitHub
+tools/google_key.txt
+tools/mapillary_token.txt
+
+# Cache delle foto (Street View e Mapillary): enormi e con licenze che non permettono di ripubblicarle
+tools/cache_streetview/
+tools/cache_mapillary/
+
+# Roba locale
+tools/pubblica_auto.log
+__pycache__/
+graphify-out/
+/C
+*.tmp

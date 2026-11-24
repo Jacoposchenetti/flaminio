@@ -1,0 +1,11 @@
+SERVER DI FLAMINIO SUL TELEFONO
+
+Il telefono ospita la partita senza schermo e senza personaggio: gli amici scrivono nel menu l'indirizzo
+Tailscale del telefono e premono "Entra". Clan, territori e spacciatori si salvano sul telefono.
+
+- Si accende da solo: Termux:Boot lancia ~/.termux/boot/termux-boot.sh, che avvia /root/avvia.sh in Debian.
+- Si aggiorna da solo: prima di ogni avvio scarica l'ultima versione pubblicata; quando ne esce una nuova e non
+  c'e nessuno in partita, il server si chiude e riparte gia aggiornato.
+- Se si chiude per un errore riparte dopo 10 secondi.
+- Registro: /root/flaminio-server.log dentro Debian (in Termux: proot-distro login debian -- tail -f flaminio-server.log).
+- Tenerlo in carica con "Proteggi batteria" (85%) e sul Wi-Fi di casa.
