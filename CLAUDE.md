@@ -51,7 +51,11 @@ C'è un grafo graphify (`graphify-out/`). Per domande sul codice usare prima
 
 - Repo pubblico `github.com/Jacoposchenetti/flaminio`. Il branch `aggiornamenti` e i tag `vN`
   contengono il gioco pronto e `manifest.json` (MD5 per file).
-- `python tools/pubblica_aggiornamento.py` aumenta `tools/versione.txt` e pubblica.
+- Il sorgente è nel ramo `main` dello stesso repo (questa cartella è un clone git). Anche Sestiano (collaboratore
+  con permesso di scrittura, voluto dall'utente) pubblica: guida in `CONTRIBUIRE.md`.
+- `python tools/pubblica_aggiornamento.py` prima allinea il sorgente a `main` (commit delle modifiche locali,
+  rebase su origin/main, push; se c'è conflitto non pubblica), poi aumenta `tools/versione.txt` e pubblica.
+  Commit su `main` in inglese.
 - Un'attività pianificata di Windows ("Flaminio - pubblica aggiornamenti") esegue `--auto` ogni
   30 minuti. Pubblica solo se ci sono modifiche ferme da 20 minuti e senza errori negli script;
   log in `tools/pubblica_auto.log`. **Ogni modifica salvata può quindi arrivare agli amici.**
